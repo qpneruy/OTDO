@@ -1,0 +1,9 @@
+# Local exam data and generated caches
+data/
+__pycache__/
+*.py[cod]
+
+# Local OS / shortcut artifacts
+*.lnk
+Thumbs.db
+.DS_Store

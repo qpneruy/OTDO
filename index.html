@@ -1,0 +1,2364 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OTDO</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Crect width='24' height='24' rx='5' fill='%230F766E'/%3E%3Cpath d='M8.5 12l2.5 2.5L16.5 9' stroke='%23FFFFFF' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M19 12.5V17a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h7.5' stroke='%23FFFFFF' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "vue": "https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.esm-browser.prod.js",
+      "zod": "https://cdn.jsdelivr.net/npm/zod@3.24.2/+esm",
+      "js-yaml": "https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/+esm",
+      "marked": "https://cdn.jsdelivr.net/npm/marked@12.0.2/+esm",
+      "dompurify": "https://cdn.jsdelivr.net/npm/dompurify@3.2.4/+esm",
+      "sortablejs": "https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/+esm",
+      "katex": "https://cdn.jsdelivr.net/npm/katex@0.16.11/+esm"
+    }
+  }
+  </script>
+</head>
+<body class="bg-slate-100 text-slate-900 antialiased">
+  <main id="app" v-cloak>
+    <div :class="view === 'editor' ? 'w-full max-w-none px-4 py-3' : view === 'quiz' ? 'w-[96vw] max-w-[1280px] mx-auto px-4 py-5' : view === 'profile' ? 'w-[96vw] max-w-[1140px] mx-auto px-4 py-5' : 'max-w-[1100px] mx-auto px-4 py-5'">
+      <!-- Màn hình 1: Danh sách đề -->
+      <section id="view-list" v-if="view === 'list'" class="pb-7" aria-labelledby="app-title">
+        <header class="bg-white border border-slate-300 rounded-[10px] px-4 py-3 mb-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.05)]">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-2.5 min-w-0">
+              <span class="w-9 h-9 rounded-md bg-teal-700 text-white inline-flex items-center justify-center shrink-0" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 11l3 3L22 4"></path>
+                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                </svg>
+              </span>
+              <h1 id="app-title" class="m-0 text-[1.25rem] sm:text-[1.375rem] font-bold text-slate-900">OTDO</h1>
+              <span class="badge">
+                {{ visibleExamCards.length === examCards.length ? `${examCards.length} đề` : `${visibleExamCards.length} / ${examCards.length} đề` }}
+              </span>
+              <span v-if="serverConnected" id="server-sync-badge" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200" title="Đang kết nối & đồng bộ trực tiếp với Server/MCP">
+                <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                MCP Sync
+              </span>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button id="btn-open-profile" type="button" class="btn btn-secondary" @click="openProfile()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="text-teal-700">
+                  <path d="M3 3v18h18"></path>
+                  <path d="M18 17V9"></path>
+                  <path d="M13 17V5"></path>
+                  <path d="M8 17v-3"></path>
+                </svg>
+                <span>Hồ sơ &amp; Thống kê</span>
+                <span v-if="headerCurrentStreak > 0" id="header-streak-badge" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-orange-100 text-orange-800 border border-orange-300" :title="`Streak hiện tại: ${headerCurrentStreak} ngày`">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="text-orange-600">
+                    <path d="M12 2c1.5 3.5 4 5.5 4 9a4 4 0 1 1-8 0c0-1.5.5-3 1.5-4.5C10.5 8 12 5 12 2z"></path>
+                  </svg>
+                  {{ headerCurrentStreak }}
+                </span>
+              </button>
+              <button id="btn-create-exam" type="button" class="btn btn-primary" @click="openEditor(null)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                Tạo đề mới
+              </button>
+            </div>
+          </div>
+
+          <div class="mt-3 pt-3 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center gap-2.5">
+            <div class="relative flex-1 min-w-0">
+              <svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="8"></circle>
+                <path d="m21 21-4.3-4.3"></path>
+              </svg>
+              <input id="search-exam-input" type="text" v-model.trim="searchQuery" placeholder="Tìm theo tên đề hoặc môn học..." aria-label="Tìm kiếm đề ôn tập" class="field-control w-full pl-10 pr-10">
+              <button v-if="searchQuery" type="button" @click="searchQuery = ''" aria-label="Xóa từ khóa tìm kiếm" title="Xóa tìm kiếm" class="btn-icon !w-8 !h-8 absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-900 hover:bg-slate-200">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+            <div class="flex flex-wrap items-center gap-2.5 sm:shrink-0 max-w-full">
+              <div class="flex items-center gap-2 min-w-0">
+                <label for="sort-exam-select" class="text-xs font-semibold text-slate-600 whitespace-nowrap">Sắp xếp:</label>
+                <select id="sort-exam-select" v-model="sortBy" aria-label="Sắp xếp danh sách đề" class="field-control max-w-full">
+                  <option value="recent">Mới cập nhật</option>
+                  <option value="title">Tên A-Z</option>
+                  <option value="questions">Số câu hỏi</option>
+                </select>
+              </div>
+              <button
+                id="toggle-turbo-mode"
+                type="button"
+                role="switch"
+                :aria-checked="turboModePref"
+                @click="toggleTurboModePref"
+                class="turbo-switch"
+                :class="{ 'is-on': turboModePref }"
+                title="Chế độ Turbo: chọn đáp án biết đúng/sai &amp; xem giải thích ngay lập tức"
+              >
+                <svg class="turbo-switch-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                </svg>
+                <span class="text-xs sm:text-sm font-semibold whitespace-nowrap">Chế độ Turbo</span>
+                <span class="turbo-switch-track" aria-hidden="true">
+                  <span class="turbo-switch-thumb"></span>
+                </span>
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <nav id="home-main-tabs" role="tablist" aria-label="Chế độ xem danh sách" class="home-main-tabs mb-3.5">
+          <button
+            id="tab-home-browse"
+            type="button"
+            role="tab"
+            :aria-selected="homeTab === 'browse'"
+            class="home-main-tab"
+            :class="{ 'is-active': homeTab === 'browse' }"
+            @click="homeTab = 'browse'"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span>Môn học</span>
+          </button>
+          <button
+            id="tab-home-pinned"
+            type="button"
+            role="tab"
+            :aria-selected="homeTab === 'pinned'"
+            class="home-main-tab"
+            :class="{ 'is-active': homeTab === 'pinned' }"
+            @click="homeTab = 'pinned'"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" :fill="homeTab === 'pinned' ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" :class="homeTab === 'pinned' ? 'text-amber-500' : ''">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+            </svg>
+            <span>Đã ghim</span>
+            <span class="home-tab-count" :class="{ 'is-active': homeTab === 'pinned' }">{{ pinnedExamCards.length }}</span>
+          </button>
+        </nav>
+
+        <nav id="folder-breadcrumb" v-if="homeTab === 'browse' && !searchQuery.trim()" aria-label="Đường dẫn thư mục" class="breadcrumb-bar mb-3.5">
+          <div class="flex flex-wrap items-center gap-1 min-w-0">
+            <template v-for="(seg, idx) in breadcrumbSegments" :key="seg.path || '__root__'">
+              <span v-if="idx > 0" class="breadcrumb-sep" aria-hidden="true">/</span>
+              <button
+                type="button"
+                class="breadcrumb-item"
+                :class="{ 'is-current': idx === breadcrumbSegments.length - 1 }"
+                :aria-current="idx === breadcrumbSegments.length - 1 ? 'page' : undefined"
+                @click="openFolder(seg.path)"
+              >{{ seg.label }}</button>
+            </template>
+          </div>
+          <div class="flex flex-wrap items-center gap-2.5 shrink-0">
+            <span
+              v-if="breadcrumbSegments.length > 1 && subjectGpaMap && subjectGpaMap[breadcrumbSegments[1].path] != null"
+              class="badge badge-time tabular-nums"
+            >ĐTB môn: {{ Number.isFinite(Number(subjectGpaMap[breadcrumbSegments[1].path])) ? Number(subjectGpaMap[breadcrumbSegments[1].path]).toFixed(2) : subjectGpaMap[breadcrumbSegments[1].path] }}</span>
+            <span class="hidden md:inline-flex items-center gap-1.5 text-xs text-slate-500">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="text-slate-400">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+              </svg>
+              Chuột phải để tạo môn, thư mục, đổi tên hoặc di chuyển
+            </span>
+          </div>
+        </nav>
+
+        <div id="delete-confirm-banner" class="flex flex-wrap items-center justify-between gap-3 rounded-[10px] p-4 mb-[18px] border-[1.5px] border-orange-700 bg-orange-50" :class="{ hidden: !pendingDeleteId }" role="alert">
+          <span id="delete-confirm-text">Bạn có chắc muốn xóa "{{ pendingDeleteTitle }}"?</span>
+          <div class="flex flex-wrap items-center gap-2">
+            <button id="btn-confirm-delete" type="button" class="btn btn-danger" @click="confirmDelete">Xóa đề</button>
+            <button id="btn-cancel-delete" type="button" class="btn btn-secondary" @click="pendingDeleteId = null">Hủy</button>
+          </div>
+        </div>
+
+        <div id="view-list-workspace" class="min-h-[340px] rounded-[10px]" @contextmenu.prevent="openBlankContextMenu($event)">
+          <div
+            v-if="homeTab === 'browse' && !searchQuery.trim() && childFolders.length > 0"
+            id="folder-grid"
+            class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4"
+          >
+            <div
+              v-for="f in childFolders"
+              :key="f.path"
+              v-memo="[f.path, f.name, f.isSubject, f.totalExamCount, f.subfolderCount, f.avgScore]"
+              class="folder-card"
+              :class="{ 'is-subject': f.isSubject }"
+              :data-folder-path="f.path"
+              tabindex="0"
+              role="button"
+              @click="openFolder(f.path)"
+              @keydown.enter.prevent="openFolder(f.path)"
+              @keydown.space.prevent="openFolder(f.path)"
+              @contextmenu.prevent.stop="openFolderContextMenu($event, f)"
+            >
+              <div class="flex items-start gap-3 min-w-0">
+                <span class="folder-icon-badge" :class="f.isSubject ? 'is-subject' : 'is-subfolder'" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                </span>
+                <div class="min-w-0 flex-1">
+                  <h3 class="m-0 text-[0.9375rem] font-bold text-slate-900 truncate leading-snug" :title="f.name">{{ f.name }}</h3>
+                  <p class="m-0 mt-0.5 text-xs font-medium text-slate-500 truncate">
+                    <span>{{ f.totalExamCount }} đề</span>
+                    <span v-if="f.subfolderCount > 0"> · {{ f.subfolderCount }} thư mục</span>
+                  </p>
+                </div>
+              </div>
+              <div v-if="f.isSubject" class="mt-2.5 pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-1.5">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                  Môn học
+                </span>
+                <span
+                  v-if="f.avgScore !== null && f.avgScore !== undefined"
+                  class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-teal-50 text-teal-800 border border-teal-200 tabular-nums"
+                >
+                  ĐTB {{ Number.isFinite(Number(f.avgScore)) ? Number(f.avgScore).toFixed(2) : f.avgScore }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div id="exam-list" class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+            <div v-if="homeTab === 'pinned' && !searchQuery.trim() && pinnedExamCards.length === 0" class="md:col-span-2 bg-white border border-slate-300 rounded-[10px] text-center py-12 px-5 text-slate-700">
+              <div class="mx-auto mb-3 w-12 h-12 rounded-full bg-amber-50 border border-amber-200 text-amber-500 inline-flex items-center justify-center" aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                </svg>
+              </div>
+              <p class="m-0 text-sm font-medium text-slate-700">Chưa có đề nào được ghim. Nhấn nút ngôi sao hoặc chuột phải vào đề để ghim.</p>
+            </div>
+            <div v-else-if="searchQuery.trim() && visibleExamCards.length === 0" class="md:col-span-2 bg-white border border-slate-300 rounded-[10px] text-center py-10 px-5 text-slate-700">
+              <p class="m-0 mb-4 text-base font-medium text-slate-800">Không tìm thấy đề phù hợp</p>
+              <button id="btn-reset-filters" type="button" class="btn btn-secondary" @click="resetFilters">Xóa bộ lọc</button>
+            </div>
+            <div v-else-if="homeTab === 'browse' && !searchQuery.trim() && childFolders.length === 0 && visibleExamCards.length === 0" class="md:col-span-2 bg-white border border-dashed border-slate-300 rounded-[10px] text-center py-12 px-5 text-slate-700">
+              <div class="mx-auto mb-3 w-12 h-12 rounded-full bg-teal-50 border border-teal-200 text-teal-700 inline-flex items-center justify-center" aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+              </div>
+              <p class="m-0 mb-4 text-sm font-medium text-slate-700">Thư mục này đang trống — Chuột phải vào đây để tạo thư mục mới hoặc tạo đề mới</p>
+              <div class="flex flex-wrap items-center justify-center gap-2">
+                <button type="button" class="btn btn-secondary btn-sm" @click="openCreateFolderModal(currentFolderPath)">
+                  {{ currentFolderPath === '' ? 'Tạo môn mới' : 'Tạo thư mục mới' }}
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" @click="openEditor(null)">Tạo đề mới</button>
+              </div>
+            </div>
+            <article
+              v-for="card in visibleExamCards"
+              :key="card.id"
+              v-memo="[card.ok, card.title, card.folder, card.pinned, card.updatedAt, card.stats?.sections, card.stats?.total, card.breakdown, card.timeLimit, card.hasSavedProgress, card.savedElapsedDisplay, homeTab === 'pinned' || Boolean(searchQuery.trim())]"
+              class="exam-card relative flex flex-col justify-between gap-3 bg-white border rounded-[10px] p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors duration-150"
+              :class="card.pinned ? 'border-amber-300 ring-1 ring-amber-200/70' : 'border-slate-300 hover:border-slate-400'"
+              @contextmenu.prevent.stop="openExamContextMenu($event, card)"
+            >
+              <div class="flex items-start justify-between gap-2.5">
+                <div class="min-w-0 flex-1">
+                  <button
+                    v-if="card.folder && (homeTab === 'pinned' || searchQuery.trim())"
+                    type="button"
+                    @click.stop="openFolder(card.folder)"
+                    :title="`Mở thư mục ${card.folder}`"
+                    class="inline-flex items-center gap-1 max-w-full px-2 py-0.5 mb-1.5 rounded-md text-xs font-semibold bg-teal-50 text-teal-800 border border-teal-200 hover:bg-teal-100 transition-colors cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="shrink-0">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    <span class="truncate">{{ card.folder }}</span>
+                  </button>
+                  <h2 class="m-0 text-[1.0625rem] font-bold text-slate-900 leading-snug break-words">{{ card.ok ? card.title : 'Đề bị lỗi định dạng' }}</h2>
+                </div>
+
+                <div class="flex items-center gap-1 shrink-0 -mt-1 -mr-1">
+                  <button
+                    type="button"
+                    data-action="pin"
+                    @click.stop="togglePinExam(card.id)"
+                    :aria-label="card.pinned ? 'Bỏ ghim đề' : 'Ghim đề'"
+                    :title="card.pinned ? 'Bỏ ghim đề' : 'Ghim đề'"
+                    :aria-pressed="Boolean(card.pinned)"
+                    class="btn-icon"
+                    :class="card.pinned
+                      ? 'text-amber-500 bg-amber-50 border-amber-200 hover:bg-amber-100'
+                      : 'text-slate-400 hover:text-amber-600 hover:bg-amber-50'"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" :fill="card.pinned ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    data-action="delete"
+                    @click.stop="requestDelete(card.id)"
+                    aria-label="Xóa đề"
+                    title="Xóa đề"
+                    class="btn-icon text-slate-400 hover:text-rose-600 hover:bg-rose-50 focus-visible:outline-rose-600"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      <line x1="10" y1="11" x2="10" y2="17"></line>
+                      <line x1="14" y1="11" x2="14" y2="17"></line>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap gap-2 text-sm text-slate-700">
+                <template v-if="card.ok">
+                  <span class="badge">{{ card.stats.sections }} phần</span>
+                  <span class="badge">{{ card.stats.total }} câu ({{ card.breakdown }})</span>
+                  <span v-if="card.timeLimit" class="badge badge-time" title="Thời gian làm bài mặc định">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                    {{ card.timeLimit }} phút
+                  </span>
+                  <span v-if="card.hasSavedProgress" class="badge badge-progress" title="Tiến trình làm bài đang được lưu">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                    Đang làm dở · {{ card.savedElapsedDisplay }}
+                  </span>
+                </template>
+                <span v-else class="badge badge-error">Không thể đọc YAML</span>
+              </div>
+
+              <div class="actions-row flex flex-wrap items-center gap-2 pt-2.5 mt-auto border-t border-slate-100">
+                <button v-if="card.ok" type="button" class="btn btn-primary" data-action="start" @click="startQuiz(card.id)">Làm bài</button>
+                <button type="button" class="btn btn-secondary" data-action="edit" @click="openEditor(card.id)">Biên tập</button>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div
+          v-if="contextMenu"
+          id="context-menu"
+          class="context-menu"
+          role="menu"
+          :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+          @click.stop
+          @contextmenu.prevent.stop
+        >
+          <template v-if="contextMenu.type === 'blank'">
+            <button
+              v-if="currentFolderPath === ''"
+              type="button"
+              role="menuitem"
+              class="context-menu-item"
+              @click="openCreateFolderModal(''); closeContextMenu()"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 10v6"></path>
+                <path d="M9 13h6"></path>
+                <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path>
+              </svg>
+              <span>Tạo môn mới</span>
+            </button>
+            <button
+              v-else
+              type="button"
+              role="menuitem"
+              class="context-menu-item"
+              @click="openCreateFolderModal(currentFolderPath); closeContextMenu()"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 10v6"></path>
+                <path d="M9 13h6"></path>
+                <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path>
+              </svg>
+              <span>Tạo thư mục mới</span>
+            </button>
+            <div class="context-menu-divider" role="separator"></div>
+            <button
+              type="button"
+              role="menuitem"
+              class="context-menu-item"
+              @click="closeContextMenu(); openEditor(null)"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="12" y1="18" x2="12" y2="12"></line>
+                <line x1="9" y1="15" x2="15" y2="15"></line>
+              </svg>
+              <span>Tạo đề mới ở đây</span>
+            </button>
+          </template>
+
+          <template v-else-if="contextMenu.type === 'folder' && contextMenu.target">
+            <button
+              type="button"
+              role="menuitem"
+              class="context-menu-item"
+              @click="openFolder(contextMenu.target.path)"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"></path>
+              </svg>
+              <span>Mở thư mục</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              class="context-menu-item"
+              @click="openCreateFolderModal(contextMenu.target.path); closeContextMenu()"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 10v6"></path>
+                <path d="M9 13h6"></path>
+                <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path>
+              </svg>
+              <span>Tạo thư mục con</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              class="context-menu-item"
+              @click="openRenameFolderModal(contextMenu.target.path); closeContextMenu()"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+              <span>Đổi tên</span>
+            </button>
+            <button
+              v-if="!contextMenu.target.isSubject"
+              type="button"
+              role="menuitem"
+              class="context-menu-item"
+              @click="openMoveFolderModal(contextMenu.target.path); closeContextMenu()"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M15 3h6v6"></path>
+                <path d="M10 14 21 3"></path>
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+              </svg>
+              <span>Di chuyển tới...</span>
+            </button>
+            <div class="context-menu-divider" role="separator"></div>
+            <button
+              type="button"
+              role="menuitem"
+              class="context-menu-item is-danger"
+              @click="openDeleteFolderModal(contextMenu.target); closeContextMenu()"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+              <span>Xóa thư mục</span>
+            </button>
+          </template>
+
+          <template v-else-if="contextMenu.type === 'exam' && contextMenu.target">
+            <button
+              v-if="contextMenu.target.ok"
+              type="button"
+              role="menuitem"
+              class="context-menu-item"
+              @click="closeContextMenu(); startQuiz(contextMenu.target.id)"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              <span>Làm bài</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              class="context-menu-item"
+              @click="closeContextMenu(); openEditor(contextMenu.target.id)"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+              </svg>
+              <span>Biên tập</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              class="context-menu-item"
+              @click="togglePinExam(contextMenu.target.id); closeContextMenu()"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" :fill="contextMenu.target.pinned ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="text-amber-500">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+              </svg>
+              <span>{{ contextMenu.target.pinned ? 'Bỏ ghim đề' : 'Ghim đề' }}</span>
+            </button>
+            <button
+              v-if="contextMenu.target.ok"
+              type="button"
+              role="menuitem"
+              class="context-menu-item"
+              @click="openMoveExamModal(contextMenu.target); closeContextMenu()"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M15 3h6v6"></path>
+                <path d="M10 14 21 3"></path>
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+              </svg>
+              <span>Di chuyển tới...</span>
+            </button>
+            <div class="context-menu-divider" role="separator"></div>
+            <button
+              type="button"
+              role="menuitem"
+              class="context-menu-item is-danger"
+              @click="closeContextMenu(); requestDelete(contextMenu.target.id)"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+              <span>Xóa đề</span>
+            </button>
+          </template>
+        </div>
+
+        <div
+          v-if="folderModal"
+          id="folder-input-modal"
+          class="quiz-pause-overlay z-40"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="folder-modal-title"
+          @click.self="folderModal = null"
+        >
+          <div class="quiz-pause-card !text-left !max-w-[420px]">
+            <form @submit.prevent="submitFolderModal">
+              <h2 id="folder-modal-title" class="m-0 text-lg font-bold text-slate-900">
+                {{ folderModal.mode === 'create-subject' ? 'Tạo môn mới' : folderModal.mode === 'create-folder' ? 'Tạo thư mục mới' : 'Đổi tên thư mục' }}
+              </h2>
+              <p v-if="folderModal.mode === 'create-folder' && folderModal.parentPath" class="mt-1.5 mb-0 text-xs font-medium text-slate-500 break-all">
+                Trong: {{ folderModal.parentPath }}
+              </p>
+              <p v-else-if="folderModal.mode === 'rename' && folderModal.oldPath" class="mt-1.5 mb-0 text-xs font-medium text-slate-500 break-all">
+                Đường dẫn hiện tại: {{ folderModal.oldPath }}
+              </p>
+              <div class="mt-3.5 mb-4">
+                <label for="folder-name-input" class="block text-xs font-semibold text-slate-700 mb-1.5">
+                  {{ folderModal.mode === 'create-subject' ? 'Tên môn học' : 'Tên thư mục' }}
+                </label>
+                <input
+                  id="folder-name-input"
+                  type="text"
+                  v-model="folderModal.name"
+                  class="field-control w-full"
+                  :placeholder="folderModal.mode === 'create-subject' ? 'Ví dụ: Toán, Hóa học...' : 'Ví dụ: Chương 1, Đề thi thử...'"
+                  autocomplete="off"
+                  required
+                >
+              </div>
+              <div class="flex items-center justify-end gap-2">
+                <button id="btn-folder-modal-cancel" type="button" class="btn btn-secondary" @click="folderModal = null">Hủy</button>
+                <button id="btn-folder-modal-confirm" type="submit" class="btn btn-primary">
+                  {{ folderModal.mode === 'rename' ? 'Lưu tên mới' : 'Tạo' }}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div
+          v-if="moveModal"
+          id="move-target-modal"
+          class="quiz-pause-overlay z-40"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="move-modal-title"
+          @click.self="moveModal = null"
+        >
+          <div class="quiz-pause-card !text-left !max-w-[460px]">
+            <h2 id="move-modal-title" class="m-0 text-lg font-bold text-slate-900">
+              {{ moveModal.type === 'folder' ? 'Di chuyển thư mục' : 'Di chuyển đề ôn tập' }}
+            </h2>
+            <p class="mt-1.5 mb-3 text-sm font-medium text-slate-600 break-words">
+              {{ moveModal.title || moveModal.oldPath }}
+            </p>
+            <div class="max-h-[280px] overflow-y-auto border border-slate-200 rounded-[8px] bg-slate-50/70 p-1.5 space-y-1 mb-4">
+              <button
+                v-for="opt in moveDestinationOptions"
+                :key="opt.path || '__root__'"
+                type="button"
+                class="move-tree-item"
+                :class="{ 'is-selected': moveModal.selectedPath === opt.path }"
+                :data-move-path="opt.path"
+                :style="{ paddingLeft: `${12 + (opt.depth || 0) * 18}px` }"
+                @click="moveModal.selectedPath = opt.path"
+              >
+                <svg v-if="opt.path === ''" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="shrink-0">
+                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                  <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                </svg>
+                <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="shrink-0">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <span class="truncate font-medium">{{ opt.label }}</span>
+                <span v-if="opt.fullPath && opt.depth > 0" class="ml-auto text-[11px] text-slate-400 truncate max-w-[160px]">{{ opt.fullPath }}</span>
+              </button>
+            </div>
+            <div class="flex items-center justify-end gap-2">
+              <button id="btn-move-cancel" type="button" class="btn btn-secondary" @click="moveModal = null">Hủy</button>
+              <button id="btn-move-confirm" type="button" class="btn btn-primary" @click="confirmMoveModal">Di chuyển</button>
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-if="deleteFolderModal"
+          id="delete-folder-modal"
+          class="quiz-pause-overlay z-40"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-folder-title"
+          @click.self="deleteFolderModal = null"
+        >
+          <div class="quiz-pause-card !max-w-[440px]">
+            <div class="mx-auto mb-3 inline-flex items-center justify-center w-14 h-14 rounded-full bg-red-50 text-red-600 border border-red-200" aria-hidden="true">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </div>
+            <h2 id="delete-folder-title" class="m-0 text-lg font-bold text-slate-900">
+              Xóa {{ deleteFolderModal.isSubject ? 'môn học' : 'thư mục' }} "{{ deleteFolderModal.name }}"?
+            </h2>
+            <p class="mt-2 mb-4 text-sm text-slate-600">
+              Hiện có <strong>{{ deleteFolderModal.examCount }}</strong> đề nằm bên trong thư mục này. Bạn muốn giữ lại các đề (đưa ra thư mục cha) hay xóa toàn bộ?
+            </p>
+            <div class="flex flex-col gap-2">
+              <button id="btn-delete-folder-keep" type="button" class="btn btn-secondary w-full" @click="confirmDeleteFolder('keep-exams')">Chỉ xóa thư mục, giữ lại đề</button>
+              <button id="btn-delete-folder-all" type="button" class="btn btn-danger w-full" @click="confirmDeleteFolder('delete-all')">Xóa thư mục và toàn bộ đề</button>
+              <button id="btn-delete-folder-cancel" type="button" class="btn btn-secondary w-full !border-transparent !text-slate-600 hover:!text-slate-900" @click="deleteFolderModal = null">Hủy</button>
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-if="pendingResumeQuiz"
+          id="resume-quiz-overlay"
+          class="quiz-pause-overlay z-30"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="resume-quiz-title"
+        >
+          <div class="quiz-pause-card">
+            <div class="mx-auto mb-3 inline-flex items-center justify-center w-16 h-16 rounded-full bg-amber-50 text-amber-700 border border-amber-200" aria-hidden="true">
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 1 0 3-6.7L3 8"></path>
+                <path d="M3 3v5h5"></path>
+                <path d="M12 7v5l3 2"></path>
+              </svg>
+            </div>
+            <h2 id="resume-quiz-title" class="m-0 text-lg font-bold text-slate-900">Tiếp tục bài làm dở?</h2>
+            <p class="mt-2 mb-1.5 text-sm font-semibold text-slate-900 break-words">{{ pendingResumeQuiz.title }}</p>
+            <div class="inline-flex items-center justify-center gap-1.5 px-3 py-1 mb-2.5 rounded-full bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-800">
+              Đã làm {{ pendingResumeQuiz.answeredCount }}/{{ pendingResumeQuiz.totalQuestions }} câu · {{ pendingResumeQuiz.elapsedDisplay }}
+            </div>
+            <p class="mt-0 mb-4 text-sm text-slate-600">Bạn muốn làm lại từ đầu hay tiếp tục từ lúc bỏ dở lần trước?</p>
+            <div class="flex flex-col gap-2">
+              <button id="btn-resume-saved-quiz" type="button" class="btn btn-primary w-full" @click="resumeSavedQuiz">Tiếp tục từ lúc bỏ dở</button>
+              <button id="btn-restart-saved-quiz" type="button" class="btn btn-secondary w-full" @click="restartSavedQuiz">Làm lại từ đầu</button>
+              <button id="btn-cancel-resume-quiz" type="button" class="btn btn-secondary w-full !border-transparent !text-slate-600 hover:!text-slate-900" @click="cancelResumeQuiz">Hủy</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Màn hình 2: Tạo / Sửa đề -->
+      <section id="view-editor" v-else-if="view === 'editor'" aria-label="Soạn đề ôn tập">
+        <header class="flex flex-wrap items-center justify-between gap-2.5 bg-white border border-slate-300 rounded-[10px] px-4 py-3 mb-4 shadow-[0_1px_2px_rgba(15,23,42,0.05)]">
+          <div class="flex flex-wrap items-center gap-2 shrink-0">
+            <button id="btn-editor-back" type="button" class="btn btn-secondary" @click="goList">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+              Quay lại
+            </button>
+          </div>
+          <div class="flex flex-wrap sm:flex-nowrap items-center gap-2 flex-1 min-w-[240px] max-w-full sm:min-w-[440px]">
+            <input id="editor-title-input" type="text" class="field-control w-full sm:w-auto sm:flex-1 min-w-[180px] text-left sm:text-center text-[1.0625rem] font-bold bg-white border-slate-400" v-model="editorTitle" @input="onHeaderTitleInput" placeholder="Nhập tên đề ôn tập..." aria-label="Tên đề ôn tập">
+            <input id="editor-folder-input" type="text" class="field-control flex-1 min-w-[140px] sm:flex-none sm:w-[165px]" v-model="editorFolder" @input="onHeaderFolderInput" list="folder-suggestions" placeholder="Thư mục / Môn..." aria-label="Thư mục hoặc môn học">
+            <datalist id="folder-suggestions">
+              <option v-for="f in availableFolders" :key="f" :value="f"></option>
+            </datalist>
+            <input id="editor-time-limit-input" type="number" min="1" max="600" step="1" class="field-control w-[100px] shrink-0 text-center" v-model="editorTimeLimit" @input="onHeaderTimeLimitInput" placeholder="Phút" aria-label="Thời gian làm bài (phút)" title="Giới hạn thời gian làm bài (phút), bỏ trống nếu chỉ bấm giờ">
+          </div>
+          <div class="actions-row flex flex-wrap items-center gap-2 min-w-0 max-w-full lg:shrink-0">
+            <input id="import-yaml-file" type="file" accept=".yaml,.yml,.txt" class="hidden" @change="handleImportYamlFile">
+            <button id="btn-import-yaml" type="button" class="btn btn-secondary px-3.5" @click="triggerImportYaml">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+              Import
+            </button>
+            <button id="btn-export-yaml" type="button" class="btn btn-secondary px-3.5" @click="exportYaml" :disabled="!canSaveExam || !yamlText.trim()">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              Xuất đề
+            </button>
+            <button id="btn-copy-prompt" type="button" class="btn btn-secondary" @click="copyAiPrompt">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+              <span id="copy-prompt-label">{{ copyLabel }}</span>
+            </button>
+            <button id="btn-save-exam" type="button" class="btn btn-primary" :disabled="!canSaveExam" @click="saveCurrentExam">Lưu đề</button>
+          </div>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
+          <div class="min-w-0">
+            <div id="editor-feedback" class="h-[calc(100vh-115px)] min-h-[680px] overflow-y-auto rounded-[10px] p-4 border-[1.5px]" :class="editorErrors.length > 0 ? 'panel-error bg-red-50 border-red-300 text-red-700' : 'bg-slate-50 border-slate-400'" aria-live="polite" ref="previewPaneRef" @click="onLeftPaneInteract" @focusin="onLeftPaneInteract">
+              <template v-if="editorErrors.length > 0">
+                <strong>Phát hiện {{ editorErrors.length }} lỗi:</strong>
+                <ul class="mt-2 pl-5 list-disc space-y-1">
+                  <li v-for="(err, idx) in editorErrors" :key="idx">{{ err }}</li>
+                </ul>
+              </template>
+              <template v-else-if="validatedData">
+                <div id="editor-sticky-toolbar" class="sticky top-[-16px] z-20 -mx-4 -mt-4 px-4 py-3 mb-4 bg-slate-50/95 backdrop-blur-sm border-b border-slate-200 flex flex-wrap items-center justify-between gap-2.5">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="badge bg-slate-200 text-slate-900 border-slate-300">{{ editorStats.sections }} phần · {{ editorStats.total }} câu</span>
+                    <span
+                      id="editor-total-points-badge"
+                      class="badge tabular-nums"
+                      :class="Math.abs(editorPointsSummary.totalMaxPoints - 10) < 0.01 ? 'bg-teal-50 text-teal-800 border-teal-200' : 'bg-amber-50 text-amber-800 border-amber-200'"
+                    >Tổng: {{ formatPointNum(editorPointsSummary.totalMaxPoints) }}đ</span>
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <div id="editor-panel-switcher" class="editor-panel-tabs" role="tablist" aria-label="Chế độ bảng biên tập">
+                      <button
+                        id="btn-panel-edit"
+                        type="button"
+                        role="tab"
+                        class="editor-panel-tab"
+                        :class="{ 'is-active': editorLeftPanel === 'edit' }"
+                        :aria-selected="editorLeftPanel === 'edit'"
+                        @click="setEditorLeftPanel('edit')"
+                      >Biên tập</button>
+                      <button
+                        id="btn-panel-points"
+                        type="button"
+                        role="tab"
+                        class="editor-panel-tab"
+                        :class="{ 'is-active': editorLeftPanel === 'points' }"
+                        :aria-selected="editorLeftPanel === 'points'"
+                        @click="setEditorLeftPanel('points')"
+                      >Chia điểm</button>
+                      <button
+                        id="btn-panel-reorder"
+                        type="button"
+                        role="tab"
+                        class="editor-panel-tab"
+                        :class="{ 'is-active': editorLeftPanel === 'reorder' }"
+                        :aria-selected="editorLeftPanel === 'reorder'"
+                        @click="setEditorLeftPanel('reorder')"
+                      >Sắp xếp</button>
+                    </div>
+                    <button
+                      id="btn-editor-jump"
+                      type="button"
+                      class="inline-flex items-center justify-center w-9 h-9 rounded-md border transition-colors cursor-pointer shrink-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+                      :class="showEditorJumpMenu
+                        ? 'bg-teal-700 border-teal-700 text-white shadow-sm'
+                        : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-900'"
+                      :aria-expanded="showEditorJumpMenu"
+                      title="Nhảy nhanh tới câu hỏi"
+                      aria-label="Nhảy nhanh tới câu hỏi"
+                      @click="showEditorJumpMenu = !showEditorJumpMenu"
+                    >
+                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+                        <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+                        <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+                        <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+                      </svg>
+                    </button>
+                    <button
+                      id="btn-panel-preview"
+                      type="button"
+                      class="inline-flex items-center justify-center w-9 h-9 rounded-md border transition-colors cursor-pointer shrink-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+                      :class="editorLeftPanel === 'preview'
+                        ? 'bg-teal-700 border-teal-700 text-white shadow-sm'
+                        : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-900'"
+                      :aria-pressed="editorLeftPanel === 'preview'"
+                      :title="editorLeftPanel === 'preview' ? 'Tắt xem trước — quay về Biên tập' : 'Xem trước giao diện làm bài'"
+                      :aria-label="editorLeftPanel === 'preview' ? 'Tắt xem trước — quay về Biên tập' : 'Xem trước giao diện làm bài'"
+                      @click="setEditorLeftPanel(editorLeftPanel === 'preview' ? 'edit' : 'preview')"
+                    >
+                      <svg v-if="editorLeftPanel === 'preview'" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
+                      <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"></path>
+                        <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"></path>
+                        <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"></path>
+                        <line x1="2" y1="2" x2="22" y2="22"></line>
+                      </svg>
+                    </button>
+                  </div>
+
+                  <div
+                    v-if="showEditorJumpMenu"
+                    id="editor-jump-menu"
+                    class="absolute right-4 top-full mt-1.5 z-30 w-[290px] sm:w-[310px] max-w-[calc(100%-2rem)] max-h-[65vh] overflow-y-auto bg-white border border-slate-300 rounded-[10px] p-3.5 shadow-lg"
+                    aria-label="Bảng câu hỏi"
+                  >
+                    <div class="flex items-center justify-between gap-2 mb-3">
+                      <h2 class="m-0 text-[0.9375rem] font-bold text-slate-900">Bảng câu hỏi</h2>
+                      <button type="button" class="text-xs font-semibold text-slate-500 hover:text-slate-900 cursor-pointer" @click="showEditorJumpMenu = false">Đóng</button>
+                    </div>
+                    <div v-for="(sec, sIdx) in validatedData.sections" :key="`ej_${sec._uid}`" :class="sIdx > 0 ? 'mt-3.5 pt-3 border-t border-slate-300' : ''">
+                      <div class="text-[0.8125rem] font-bold text-slate-700 mb-2">{{ sec.title || `Phần ${sIdx + 1}` }}</div>
+                      <div class="grid grid-cols-5 gap-2">
+                        <button
+                          v-for="item in getSectionNavItems(sec, sIdx)"
+                          :key="`ej_${item.key}`"
+                          type="button"
+                          class="nav-cell"
+                          :aria-label="`Đi tới Phần ${sIdx + 1}, câu ${item.num}`"
+                          @click="jumpToEditorQuestion(item.sIdx, item.qIdx, item.subIdx)"
+                        >{{ item.num }}</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Panel 1: Biên tập -->
+                <div v-if="editorLeftPanel === 'edit'" id="editor-panel-edit" role="tabpanel" aria-labelledby="btn-panel-edit">
+                  <div id="preview-sections-list" class="space-y-[26px] min-w-0">
+                    <section v-for="(sec, sIdx) in validatedData.sections" :key="sec._uid" class="min-w-0">
+                      <div class="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 mb-3 bg-slate-200 border-l-[5px] border-teal-700 px-3 py-2 rounded-md">
+                        <span class="gf-drag-handle gf-section-handle" title="Kéo để sắp xếp phần" aria-label="Kéo để sắp xếp phần">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>
+                        </span>
+                        <input type="text" class="inline-input flex-1 text-[1.0625rem] font-bold" v-model="sec.title" @input="scheduleSyncPreviewToYaml" :aria-label="`Tiêu đề phần ${sIdx + 1}`">
+                        <div class="flex flex-wrap items-center gap-1.5 shrink-0">
+                          <button type="button" class="btn btn-secondary btn-sm btn-icon" @click="moveSection(sIdx, -1)" :disabled="sIdx === 0" title="Chuyển phần lên" :aria-label="`Chuyển phần ${sIdx + 1} lên`">↑</button>
+                          <button type="button" class="btn btn-secondary btn-sm btn-icon" @click="moveSection(sIdx, 1)" :disabled="sIdx === validatedData.sections.length - 1" title="Chuyển phần xuống" :aria-label="`Chuyển phần ${sIdx + 1} xuống`">↓</button>
+                          <button type="button" class="btn btn-danger btn-sm" @click="deleteSection(sIdx)" :disabled="validatedData.sections.length <= 1">Xóa phần</button>
+                        </div>
+                      </div>
+
+                      <div class="questions-stack grid gap-3.5 min-w-0" :data-sidx="sIdx">
+                        <article v-for="(q, qIdx) in sec.questions" :key="q._uid" :id="`edq_${sIdx}_${qIdx}`" class="question-card editor-question-card" :class="{ 'editor-group-card': q.type === 'group' }">
+                          <div class="flex flex-wrap justify-between items-center gap-2.5 mb-2">
+                            <div class="flex flex-wrap items-center gap-2">
+                              <span class="gf-drag-handle gf-question-handle" title="Kéo để sắp xếp câu" aria-label="Kéo để sắp xếp câu">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>
+                              </span>
+                              <span v-if="q.type === 'group'" class="question-number question-number-group">Nhóm · {{ getGroupRangeLabel(validatedData, sIdx, qIdx, q) }}</span>
+                              <span v-else class="question-number">Câu {{ getQuestionDisplayNum(validatedData, sIdx, qIdx) }}</span>
+                              <button
+                                type="button"
+                                class="badge bg-slate-100 text-slate-700 border-slate-300 hover:bg-teal-50 hover:text-teal-800 hover:border-teal-300 cursor-pointer tabular-nums"
+                                @click="setEditorLeftPanel('points')"
+                                title="Chuyển sang tab Chia điểm"
+                              >{{ formatPointNum(getEditorQuestionMaxPoints(sIdx, qIdx)) }}đ</button>
+                            </div>
+                            <select class="min-h-[36px] px-2.5 py-1 text-[0.8125rem] font-semibold text-slate-900 bg-slate-200 border border-slate-400 rounded-md cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600" :value="q.type" @change="changeQuestionType(sec, qIdx, $event.target.value)" :aria-label="`Loại câu ${qIdx + 1}`">
+                              <option value="multiple_choice">Trắc nghiệm ABCD</option>
+                              <option value="true_false">Đúng / Sai</option>
+                              <option value="short_answer">Trả lời ngắn</option>
+                              <option value="group">Câu hỏi nhóm</option>
+                            </select>
+                          </div>
+
+                          <template v-if="q.type === 'group'">
+                            <div class="editor-group-passage mb-3.5">
+                              <input
+                                type="text"
+                                class="inline-input text-base font-bold mb-2 bg-white"
+                                v-model="q.title"
+                                @input="scheduleSyncPreviewToYaml"
+                                placeholder="Tiêu đề nhóm (tùy chọn)..."
+                                :aria-label="`Tiêu đề nhóm ${qIdx + 1}`"
+                              >
+                              <div class="gf-rich-field relative flex-1 min-w-0" @click="focusRichInput">
+                                <div class="gf-rich-preview question-text text-[0.95rem] leading-relaxed text-slate-900" v-html="renderRichPreviewHtml(q.content, 'Nhấn để nhập nội dung câu hỏi nhóm / ngữ liệu chung (hỗ trợ Markdown, $LaTeX$, bảng)...')"></div>
+                                <textarea class="inline-textarea question-text text-[0.95rem] leading-relaxed" v-model="q.content" @input="scheduleSyncPreviewToYaml" :rows="Math.max(3, lineCount(q.content))" placeholder="Nội dung câu hỏi nhóm..." :aria-label="`Nội dung câu hỏi nhóm ${qIdx + 1}`"></textarea>
+                              </div>
+                            </div>
+
+                            <div class="space-y-3 min-w-0">
+                              <div v-for="(subQ, subIdx) in q.questions" :key="subQ._uid" :id="`edq_${sIdx}_${qIdx}_${subIdx}`" class="editor-subquestion-card">
+                                <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                  <div class="flex flex-wrap items-center gap-1.5">
+                                    <span class="question-number !text-xs !py-0.5 !px-2">Câu {{ getQuestionDisplayNum(validatedData, sIdx, qIdx, subIdx) }}</span>
+                                    <button
+                                      type="button"
+                                      class="badge bg-slate-100 text-slate-700 border-slate-300 hover:bg-teal-50 hover:text-teal-800 hover:border-teal-300 cursor-pointer tabular-nums text-xs"
+                                      @click="setEditorLeftPanel('points')"
+                                      title="Chuyển sang tab Chia điểm"
+                                    >{{ formatPointNum(getEditorQuestionMaxPoints(sIdx, qIdx, subIdx)) }}đ</button>
+                                  </div>
+                                  <div class="flex flex-wrap items-center gap-1">
+                                    <select class="min-h-[32px] px-2 py-0.5 text-xs font-semibold text-slate-900 bg-slate-100 border border-slate-300 rounded-md cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600" :value="subQ.type" @change="changeSubQuestionType(q, subIdx, $event.target.value)" :aria-label="`Loại câu con ${subIdx + 1}`">
+                                      <option value="multiple_choice">Trắc nghiệm ABCD</option>
+                                      <option value="true_false">Đúng / Sai</option>
+                                      <option value="short_answer">Trả lời ngắn</option>
+                                    </select>
+                                    <button type="button" class="btn btn-secondary btn-sm btn-icon !w-8 !min-w-[32px] !h-8 !min-h-[32px]" @click="moveSubQuestion(q, subIdx, -1)" :disabled="subIdx === 0" title="Di chuyển câu con lên" :aria-label="`Di chuyển câu con ${subIdx + 1} lên`">↑</button>
+                                    <button type="button" class="btn btn-secondary btn-sm btn-icon !w-8 !min-w-[32px] !h-8 !min-h-[32px]" @click="moveSubQuestion(q, subIdx, 1)" :disabled="subIdx === q.questions.length - 1" title="Di chuyển câu con xuống" :aria-label="`Di chuyển câu con ${subIdx + 1} xuống`">↓</button>
+                                    <button type="button" class="btn btn-danger btn-sm btn-icon !w-8 !min-w-[32px] !h-8 !min-h-[32px]" @click="deleteSubQuestion(q, subIdx)" :disabled="q.questions.length <= 1" title="Xóa câu con" :aria-label="`Xóa câu con ${subIdx + 1}`">×</button>
+                                  </div>
+                                </div>
+
+                                <div class="gf-rich-field relative flex-1 min-w-0 mb-2.5" @click="focusRichInput">
+                                  <div class="gf-rich-preview question-text text-sm font-medium text-slate-900" v-html="renderRichPreviewHtml(subQ.question, 'Để trống nếu chỉ điền khuyết (1), (2)...')"></div>
+                                  <input type="text" class="inline-input text-sm font-medium" v-model="subQ.question" @input="scheduleSyncPreviewToYaml" placeholder="Để trống nếu chỉ điền khuyết (1), (2)..." :aria-label="`Nội dung câu con ${subIdx + 1}`">
+                                </div>
+
+                                <div v-if="subQ.type === 'multiple_choice'" class="grid gap-1.5">
+                                  <div v-for="key in ['A','B','C','D']" :key="key" class="option-row !min-h-[38px] !py-1.5 !px-3" :class="{ 'opt-correct': subQ.answer === key }">
+                                    <input type="radio" class="radio-input" :name="`preview_${sIdx}_${q._uid}_${subQ._uid}`" :value="key" v-model="subQ.answer" @change="syncPreviewToYaml" :aria-label="`Chọn ${key} là đáp án đúng câu con ${subIdx + 1}`">
+                                    <span class="font-bold min-w-[20px] text-sm">{{ key }}.</span>
+                                    <div class="gf-rich-field relative flex-1 min-w-0" @click="focusRichInput">
+                                      <div class="gf-rich-preview text-sm" v-html="renderRichPreviewHtml(subQ.options[key], `Đáp án ${key}`)"></div>
+                                      <input type="text" class="inline-input text-sm" v-model="subQ.options[key]" @input="scheduleSyncPreviewToYaml" :placeholder="`Đáp án ${key}`" :aria-label="`Đáp án ${key} câu con ${subIdx + 1}`">
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <template v-else-if="subQ.type === 'true_false'">
+                                  <div class="grid gap-2">
+                                    <div v-for="(st, stIdx) in subQ.statements" :key="stIdx" class="statement-row" :class="st.is_true ? 'st-correct' : 'st-wrong'">
+                                      <div class="flex-1 basis-[200px] text-slate-900 flex items-center gap-1.5">
+                                        <strong>{{ String.fromCharCode(97 + stIdx) }})</strong>
+                                        <div class="gf-rich-field relative flex-1 min-w-0" @click="focusRichInput">
+                                          <div class="gf-rich-preview text-sm" v-html="renderRichPreviewHtml(st.text, `Mệnh đề ${String.fromCharCode(97 + stIdx)}`)"></div>
+                                          <input type="text" class="inline-input text-sm" v-model="st.text" @input="scheduleSyncPreviewToYaml" :placeholder="`Mệnh đề ${String.fromCharCode(97 + stIdx)}`" :aria-label="`Ý ${String.fromCharCode(97 + stIdx)} câu con ${subIdx + 1}`">
+                                        </div>
+                                      </div>
+                                      <div class="inline-flex items-center gap-1.5">
+                                        <button type="button" class="tf-btn !min-h-[36px] !py-1 !px-2.5" :aria-pressed="st.is_true === true" @click="setStatementBool(st, true)">Đúng</button>
+                                        <button type="button" class="tf-btn !min-h-[36px] !py-1 !px-2.5" :aria-pressed="st.is_true === false" @click="setStatementBool(st, false)">Sai</button>
+                                        <button type="button" class="btn btn-danger btn-sm btn-icon" @click="deleteStatement(subQ, stIdx)" :disabled="subQ.statements.length <= 1" :title="`Xóa ý ${String.fromCharCode(97 + stIdx)}`" :aria-label="`Xóa ý ${String.fromCharCode(97 + stIdx)}`">×</button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <button v-if="subQ.statements.length < 8" type="button" class="btn-dashed" @click="addStatement(subQ)">+ Thêm mệnh đề</button>
+                                </template>
+
+                                <template v-else-if="subQ.type === 'short_answer'">
+                                  <div class="grid gap-1.5">
+                                    <div v-for="(ans, aIdx) in subQ.accepted_answers" :key="aIdx" class="flex items-center gap-2">
+                                      <input type="text" class="inline-input text-sm" v-model="subQ.accepted_answers[aIdx]" @input="scheduleSyncPreviewToYaml" placeholder="Đáp án chấp nhận..." :aria-label="`Đáp án chấp nhận ${aIdx + 1} câu con ${subIdx + 1}`">
+                                      <button type="button" class="btn btn-danger btn-sm btn-icon" @click="deleteShortAnswer(subQ, aIdx)" :disabled="subQ.accepted_answers.length <= 1" title="Xóa đáp án" :aria-label="`Xóa đáp án ${aIdx + 1}`">×</button>
+                                    </div>
+                                  </div>
+                                  <button type="button" class="btn-dashed" @click="addShortAnswer(subQ)">+ Thêm đáp án chấp nhận</button>
+                                </template>
+
+                                <div class="mt-2 pt-2 border-t border-slate-200 flex items-center gap-2 text-xs text-slate-600">
+                                  <span class="shrink-0 font-medium">Giải thích:</span>
+                                  <div class="gf-rich-field relative flex-1 min-w-0" @click="focusRichInput">
+                                    <div class="gf-rich-preview text-xs" v-html="renderRichPreviewHtml(subQ.explanation, 'Tùy chọn...')"></div>
+                                    <input type="text" class="inline-input text-xs" v-model="subQ.explanation" @input="scheduleSyncPreviewToYaml" placeholder="Tùy chọn..." :aria-label="`Giải thích câu con ${subIdx + 1}`">
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            <button v-if="q.questions.length < 50" type="button" class="btn-dashed mt-3" @click="addSubQuestion(q)">+ Thêm câu con</button>
+
+                            <div class="flex flex-wrap items-center justify-end gap-1.5 mt-3.5 pt-3 border-t border-slate-300">
+                              <button type="button" class="btn btn-secondary btn-sm" @click="insertQuestionBelow(sec, qIdx)">+ Câu dưới</button>
+                              <button type="button" class="btn btn-secondary btn-sm" @click="insertGroupBelow(sec, qIdx)">+ Nhóm dưới</button>
+                              <button type="button" class="btn btn-secondary btn-sm" @click="duplicateQuestion(sec, qIdx)">Nhân bản</button>
+                              <button type="button" class="btn btn-secondary btn-sm btn-icon" @click="moveQuestion(sec, qIdx, -1)" :disabled="qIdx === 0" title="Di chuyển lên" :aria-label="`Di chuyển nhóm ${qIdx + 1} lên`">↑</button>
+                              <button type="button" class="btn btn-secondary btn-sm btn-icon" @click="moveQuestion(sec, qIdx, 1)" :disabled="qIdx === sec.questions.length - 1" title="Di chuyển xuống" :aria-label="`Di chuyển nhóm ${qIdx + 1} xuống`">↓</button>
+                              <button type="button" class="btn btn-danger btn-sm" @click="deleteQuestion(sec, qIdx)" :disabled="sec.questions.length <= 1">Xóa</button>
+                            </div>
+                          </template>
+
+                          <template v-else>
+                            <div class="gf-rich-field relative flex-1 min-w-0 mb-3.5" @click="focusRichInput">
+                              <div class="gf-rich-preview question-text text-base font-medium text-slate-900" v-html="renderRichPreviewHtml(q.question, 'Nhấn để nhập nội dung câu hỏi (hỗ trợ $LaTeX$, **đậm**, `code`, bảng)...')"></div>
+                              <textarea class="inline-textarea question-text text-base font-medium" v-model="q.question" @input="scheduleSyncPreviewToYaml" :rows="lineCount(q.question)" placeholder="Nội dung câu hỏi..." :aria-label="`Nội dung câu ${qIdx + 1}`"></textarea>
+                            </div>
+
+                            <div v-if="q.type === 'multiple_choice'" class="grid gap-2">
+                              <div v-for="key in ['A','B','C','D']" :key="key" class="option-row" :class="{ 'opt-correct': q.answer === key }">
+                                <input type="radio" class="radio-input" :name="`preview_${sIdx}_${q._uid}`" :value="key" v-model="q.answer" @change="syncPreviewToYaml" :aria-label="`Chọn ${key} là đáp án đúng câu ${qIdx + 1}`">
+                                <span class="font-bold min-w-[22px]">{{ key }}.</span>
+                                <div class="gf-rich-field relative flex-1 min-w-0" @click="focusRichInput">
+                                  <div class="gf-rich-preview" v-html="renderRichPreviewHtml(q.options[key], `Đáp án ${key}`)"></div>
+                                  <input type="text" class="inline-input" v-model="q.options[key]" @input="scheduleSyncPreviewToYaml" :placeholder="`Đáp án ${key}`" :aria-label="`Đáp án ${key} câu ${qIdx + 1}`">
+                                </div>
+                              </div>
+                            </div>
+
+                            <template v-else-if="q.type === 'true_false'">
+                              <div class="grid gap-2.5">
+                                <div v-for="(st, stIdx) in q.statements" :key="stIdx" class="statement-row" :class="st.is_true ? 'st-correct' : 'st-wrong'">
+                                  <div class="flex-1 basis-[240px] text-slate-900 flex items-center gap-1.5">
+                                    <strong>{{ String.fromCharCode(97 + stIdx) }})</strong>
+                                    <div class="gf-rich-field relative flex-1 min-w-0" @click="focusRichInput">
+                                      <div class="gf-rich-preview" v-html="renderRichPreviewHtml(st.text, `Mệnh đề ${String.fromCharCode(97 + stIdx)}`)"></div>
+                                      <input type="text" class="inline-input" v-model="st.text" @input="scheduleSyncPreviewToYaml" :placeholder="`Mệnh đề ${String.fromCharCode(97 + stIdx)}`" :aria-label="`Ý ${String.fromCharCode(97 + stIdx)} câu ${qIdx + 1}`">
+                                    </div>
+                                  </div>
+                                  <div class="inline-flex items-center gap-2">
+                                    <button type="button" class="tf-btn" :aria-pressed="st.is_true === true" @click="setStatementBool(st, true)">Đúng</button>
+                                    <button type="button" class="tf-btn" :aria-pressed="st.is_true === false" @click="setStatementBool(st, false)">Sai</button>
+                                    <button type="button" class="btn btn-danger btn-sm btn-icon" @click="deleteStatement(q, stIdx)" :disabled="q.statements.length <= 1" :title="`Xóa ý ${String.fromCharCode(97 + stIdx)}`" :aria-label="`Xóa ý ${String.fromCharCode(97 + stIdx)}`">×</button>
+                                  </div>
+                                </div>
+                              </div>
+                              <button v-if="q.statements.length < 8" type="button" class="btn-dashed" @click="addStatement(q)">+ Thêm mệnh đề</button>
+                            </template>
+
+                            <template v-else-if="q.type === 'short_answer'">
+                              <div class="grid gap-2">
+                                <div v-for="(ans, aIdx) in q.accepted_answers" :key="aIdx" class="flex items-center gap-2">
+                                  <input type="text" class="inline-input" v-model="q.accepted_answers[aIdx]" @input="scheduleSyncPreviewToYaml" placeholder="Đáp án chấp nhận..." :aria-label="`Đáp án chấp nhận ${aIdx + 1} câu ${qIdx + 1}`">
+                                  <button type="button" class="btn btn-danger btn-sm btn-icon" @click="deleteShortAnswer(q, aIdx)" :disabled="q.accepted_answers.length <= 1" title="Xóa đáp án" :aria-label="`Xóa đáp án ${aIdx + 1}`">×</button>
+                                </div>
+                              </div>
+                              <button type="button" class="btn-dashed" @click="addShortAnswer(q)">+ Thêm đáp án chấp nhận</button>
+                            </template>
+
+                            <div class="flex flex-wrap items-center justify-between gap-2.5 mt-3.5 pt-3 border-t border-slate-300">
+                              <div class="flex-1 basis-[220px] flex items-center gap-2 text-sm text-slate-700">
+                                <span class="shrink-0">Giải thích:</span>
+                                <div class="gf-rich-field relative flex-1 min-w-0" @click="focusRichInput">
+                                  <div class="gf-rich-preview" v-html="renderRichPreviewHtml(q.explanation, 'Tùy chọn...')"></div>
+                                  <input type="text" class="inline-input" v-model="q.explanation" @input="scheduleSyncPreviewToYaml" placeholder="Tùy chọn..." :aria-label="`Giải thích câu ${qIdx + 1}`">
+                                </div>
+                              </div>
+                              <div class="flex flex-wrap items-center gap-1.5">
+                                <button type="button" class="btn btn-secondary btn-sm" @click="insertQuestionBelow(sec, qIdx)">+ Câu dưới</button>
+                                <button type="button" class="btn btn-secondary btn-sm" @click="duplicateQuestion(sec, qIdx)">Nhân bản</button>
+                                <button type="button" class="btn btn-secondary btn-sm btn-icon" @click="moveQuestion(sec, qIdx, -1)" :disabled="qIdx === 0" title="Di chuyển lên" :aria-label="`Di chuyển câu ${qIdx + 1} lên`">↑</button>
+                                <button type="button" class="btn btn-secondary btn-sm btn-icon" @click="moveQuestion(sec, qIdx, 1)" :disabled="qIdx === sec.questions.length - 1" title="Di chuyển xuống" :aria-label="`Di chuyển câu ${qIdx + 1} xuống`">↓</button>
+                                <button type="button" class="btn btn-danger btn-sm" @click="deleteQuestion(sec, qIdx)" :disabled="sec.questions.length <= 1">Xóa</button>
+                              </div>
+                            </div>
+                          </template>
+                        </article>
+                      </div>
+                      <button type="button" class="btn-dashed mt-2.5" @click="addGroupToSection(sec)">+ Thêm câu hỏi nhóm</button>
+                    </section>
+                  </div>
+                  <button type="button" class="mt-5 w-full min-h-[44px] border-[1.5px] border-dashed border-teal-700 rounded-[10px] bg-white text-teal-700 text-[0.9375rem] font-bold cursor-pointer transition-colors duration-150 hover:bg-[#E6F4F1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600" @click="addSection">+ Thêm phần mới (Section)</button>
+                </div>
+
+                <!-- Panel 2: Chia điểm -->
+                <div v-else-if="editorLeftPanel === 'points'" id="editor-panel-points" role="tabpanel" aria-labelledby="btn-panel-points">
+                  <div class="bg-white border border-slate-300 rounded-[10px] p-3.5 mb-4 space-y-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+                    <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="Công cụ tự chia điểm">
+                      <button id="btn-points-auto-equal" type="button" class="btn btn-secondary btn-sm" @click="autoDividePointsEqual" title="Tự động chia đều 10 điểm cho toàn bộ câu hỏi">
+                        Chia đều 10đ
+                      </button>
+                      <button id="btn-points-auto-section" type="button" class="btn btn-secondary btn-sm" @click="autoDividePointsBySection" title="Tự chia đều 10 điểm cho các phần, mỗi phần tự chia đều cho các câu">
+                        Chia đều theo phần
+                      </button>
+                      <button id="btn-points-auto-thpt" type="button" class="btn btn-secondary btn-sm" @click="autoDividePointsThpt" title="Áp dụng thang điểm chuẩn THPT (TN 0.25đ, Đúng/Sai 1.0đ, TLN tự chia phần còn lại)">
+                        Chuẩn THPT
+                      </button>
+                    </div>
+                    <p class="m-0 text-xs text-slate-600 leading-relaxed">
+                      Để trống ô điểm để hệ thống tự chia phần điểm còn lại trong thang 10.
+                    </p>
+                    <p v-if="Math.abs(editorPointsSummary.totalMaxPoints - 10) >= 0.01" class="m-0 px-2.5 py-1.5 rounded-md bg-amber-50 border border-amber-200 text-xs font-medium text-amber-800">
+                      Tổng điểm hiện tại khác 10đ — điểm bài làm sẽ tự quy đổi về thang 10 khi nộp.
+                    </p>
+                  </div>
+
+                  <div id="points-panel-list" class="space-y-4 min-w-0">
+                    <section v-for="(sec, sIdx) in validatedData.sections" :key="sec._uid" class="bg-white border border-slate-300 rounded-[10px] p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] min-w-0">
+                      <div class="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-slate-200">
+                        <div class="flex items-center gap-2 min-w-0 flex-1">
+                          <h3 class="m-0 text-sm font-bold text-slate-900 truncate">{{ sec.title || `Phần ${sIdx + 1}` }}</h3>
+                          <span class="badge bg-slate-100 text-slate-700 border-slate-300 text-xs shrink-0">{{ getSectionQuestionCount(sec) }} câu</span>
+                        </div>
+                        <label class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-50 border border-slate-300 text-xs font-semibold text-slate-700 shrink-0 focus-within:border-teal-600 focus-within:bg-white transition-colors" :title="`Tổng điểm Phần ${sIdx + 1} (nhập để tự chia đều cho ${getSectionQuestionCount(sec)} câu trong phần)`">
+                          <span>Điểm phần:</span>
+                          <input
+                            type="number"
+                            min="0.1"
+                            max="100"
+                            step="0.25"
+                            class="section-points-input w-[58px] bg-transparent font-bold text-teal-800 text-center focus:outline-none tabular-nums"
+                            :value="sec.points ?? ''"
+                            :placeholder="formatPointNum(editorPointsSummary.sectionMaxPoints[sIdx])"
+                            @input="onSectionPointsInput(sec, $event.target.value)"
+                            :aria-label="'Tổng điểm phần ' + (sIdx + 1)"
+                          >
+                          <span class="text-slate-500">đ</span>
+                        </label>
+                      </div>
+
+                      <div class="space-y-1.5 min-w-0">
+                        <template v-for="(q, qIdx) in sec.questions" :key="q._uid">
+                          <div v-if="q.type === 'group'" :id="`edq_${sIdx}_${qIdx}`" class="points-group-card">
+                            <div class="points-row !bg-slate-50">
+                              <span class="badge bg-teal-800 text-white border-teal-800 text-xs shrink-0">{{ getGroupRangeLabel(validatedData, sIdx, qIdx, q) }}</span>
+                              <span class="badge bg-white text-slate-700 border-slate-300 text-[11px] shrink-0">Nhóm · {{ q.questions.length }}</span>
+                              <span class="flex-1 min-w-0 truncate text-sm font-semibold text-slate-800" :title="questionItemSnippet(q)">{{ questionItemSnippet(q) }}</span>
+                              <div class="flex items-center gap-1.5 shrink-0">
+                                <label class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white border border-teal-300 text-xs font-semibold text-slate-700 focus-within:border-teal-600 transition-colors" :title="`Tổng điểm nhóm ${qIdx + 1} (để trống để tự chia)`">
+                                  <span class="text-[11px] text-slate-500">Nhóm:</span>
+                                  <input
+                                    type="number"
+                                    min="0.05"
+                                    max="100"
+                                    step="0.05"
+                                    class="question-points-input w-[52px] bg-transparent font-bold text-teal-800 text-center focus:outline-none tabular-nums"
+                                    :value="q.points ?? ''"
+                                    :placeholder="formatPointNum(getEditorQuestionMaxPoints(sIdx, qIdx))"
+                                    @input="onQuestionPointsInput(q, $event.target.value)"
+                                    :aria-label="'Tổng điểm nhóm ' + (qIdx + 1) + ' phần ' + (sIdx + 1)"
+                                  >
+                                  <span class="text-slate-500">đ</span>
+                                </label>
+                                <button
+                                  v-if="q.points != null"
+                                  type="button"
+                                  class="inline-flex items-center justify-center w-7 h-7 rounded-md border border-slate-300 bg-white text-slate-500 hover:bg-red-50 hover:text-red-700 hover:border-red-300 cursor-pointer text-sm font-bold leading-none shrink-0 transition-colors"
+                                  @click="clearQuestionPoints(q)"
+                                  title="Dùng điểm tự chia cho nhóm"
+                                  aria-label="Xóa điểm cố định nhóm này"
+                                >×</button>
+                              </div>
+                            </div>
+                            <div class="pl-4 mt-1.5 space-y-1 border-l-2 border-teal-200 ml-2">
+                              <div v-for="(subQ, subIdx) in q.questions" :key="subQ._uid" :id="`edq_${sIdx}_${qIdx}_${subIdx}`" class="points-row !min-h-[40px] !py-1">
+                                <span class="badge bg-teal-700 text-white border-teal-700 text-xs shrink-0">Câu {{ getQuestionDisplayNum(validatedData, sIdx, qIdx, subIdx) }}</span>
+                                <span class="badge text-[11px] shrink-0">{{ questionTypeShortLabel(subQ.type) }}</span>
+                                <span class="flex-1 min-w-0 truncate text-sm" :class="hasSubQuestionText(subQ) ? 'text-slate-700' : 'text-slate-400 italic'" :title="questionItemSnippet(subQ, 'Điền khuyết (không đề phụ)')">{{ questionItemSnippet(subQ, 'Điền khuyết (không đề phụ)') }}</span>
+                                <div class="flex items-center gap-1.5 shrink-0">
+                                  <label class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white border border-slate-300 text-xs font-semibold text-slate-700 focus-within:border-teal-600 transition-colors" :title="`Điểm câu ${getQuestionDisplayNum(validatedData, sIdx, qIdx, subIdx)} (để trống để tự chia)`">
+                                    <input
+                                      type="number"
+                                      min="0.05"
+                                      max="100"
+                                      step="0.05"
+                                      class="question-points-input w-[52px] bg-transparent font-bold text-teal-800 text-center focus:outline-none tabular-nums"
+                                      :value="subQ.points ?? ''"
+                                      :placeholder="formatPointNum(getEditorQuestionMaxPoints(sIdx, qIdx, subIdx))"
+                                      @input="onQuestionPointsInput(subQ, $event.target.value)"
+                                      :aria-label="'Điểm câu ' + getQuestionDisplayNum(validatedData, sIdx, qIdx, subIdx) + ' phần ' + (sIdx + 1)"
+                                    >
+                                    <span class="text-slate-500">đ</span>
+                                  </label>
+                                  <button
+                                    v-if="subQ.points != null"
+                                    type="button"
+                                    class="inline-flex items-center justify-center w-7 h-7 rounded-md border border-slate-300 bg-white text-slate-500 hover:bg-red-50 hover:text-red-700 hover:border-red-300 cursor-pointer text-sm font-bold leading-none shrink-0 transition-colors"
+                                    @click="clearQuestionPoints(subQ)"
+                                    title="Dùng điểm tự chia"
+                                    aria-label="Xóa điểm cố định câu con này"
+                                  >×</button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div v-else :id="`edq_${sIdx}_${qIdx}`" class="points-row">
+                            <span class="badge bg-teal-700 text-white border-teal-700 text-xs shrink-0">Câu {{ getQuestionDisplayNum(validatedData, sIdx, qIdx) }}</span>
+                            <span class="badge text-[11px] shrink-0">{{ questionTypeShortLabel(q.type) }}</span>
+                            <span class="flex-1 min-w-0 truncate text-sm text-slate-700" :title="plainQuestionSnippet(q.question)">{{ plainQuestionSnippet(q.question) }}</span>
+                            <div class="flex items-center gap-1.5 shrink-0">
+                              <label class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white border border-slate-300 text-xs font-semibold text-slate-700 focus-within:border-teal-600 transition-colors" :title="`Điểm câu ${getQuestionDisplayNum(validatedData, sIdx, qIdx)} (để trống để tự chia)`">
+                                <input
+                                  type="number"
+                                  min="0.05"
+                                  max="100"
+                                  step="0.05"
+                                  class="question-points-input w-[52px] bg-transparent font-bold text-teal-800 text-center focus:outline-none tabular-nums"
+                                  :value="q.points ?? ''"
+                                  :placeholder="formatPointNum(getEditorQuestionMaxPoints(sIdx, qIdx))"
+                                  @input="onQuestionPointsInput(q, $event.target.value)"
+                                  :aria-label="'Điểm câu ' + getQuestionDisplayNum(validatedData, sIdx, qIdx) + ' phần ' + (sIdx + 1)"
+                                >
+                                <span class="text-slate-500">đ</span>
+                              </label>
+                              <button
+                                v-if="q.points != null"
+                                type="button"
+                                class="inline-flex items-center justify-center w-7 h-7 rounded-md border border-slate-300 bg-white text-slate-500 hover:bg-red-50 hover:text-red-700 hover:border-red-300 cursor-pointer text-sm font-bold leading-none shrink-0 transition-colors"
+                                @click="clearQuestionPoints(q)"
+                                title="Dùng điểm tự chia"
+                                aria-label="Xóa điểm cố định câu này"
+                              >×</button>
+                            </div>
+                          </div>
+                        </template>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+
+                <!-- Panel 3: Sắp xếp -->
+                <div v-else-if="editorLeftPanel === 'reorder'" id="editor-panel-reorder" role="tabpanel" aria-labelledby="btn-panel-reorder">
+                  <div class="mb-3 px-3 py-2 rounded-md bg-teal-50/70 border border-teal-200 text-xs font-medium text-teal-900">
+                    Kéo thả tay cầm ⋮⋮ để sắp xếp Phần hoặc kéo Câu hỏi sang vị trí / Phần khác. (Hỗ trợ cả nút ↑ ↓)
+                  </div>
+
+                  <div id="reorder-sections-list" class="space-y-4 min-w-0">
+                    <section v-for="(sec, sIdx) in validatedData.sections" :key="sec._uid" class="bg-white border border-slate-300 rounded-[10px] p-3 min-w-0">
+                      <div class="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-slate-200">
+                        <span class="gf-drag-handle gf-section-handle" title="Kéo để sắp xếp phần" aria-label="Kéo để sắp xếp phần">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>
+                        </span>
+                        <span class="font-bold text-sm text-slate-900 truncate flex-1 min-w-0">{{ sec.title || `Phần ${sIdx + 1}` }}</span>
+                        <span class="badge bg-slate-100 text-slate-700 border-slate-300 text-xs shrink-0">{{ getSectionQuestionCount(sec) }} câu</span>
+                        <div class="flex items-center gap-1 shrink-0">
+                          <button type="button" class="btn btn-secondary btn-sm btn-icon" @click="moveSection(sIdx, -1)" :disabled="sIdx === 0" title="Chuyển phần lên" :aria-label="`Chuyển phần ${sIdx + 1} lên`">↑</button>
+                          <button type="button" class="btn btn-secondary btn-sm btn-icon" @click="moveSection(sIdx, 1)" :disabled="sIdx === validatedData.sections.length - 1" title="Chuyển phần xuống" :aria-label="`Chuyển phần ${sIdx + 1} xuống`">↓</button>
+                        </div>
+                      </div>
+
+                      <div class="reorder-questions-stack space-y-1.5 min-h-[44px]" :data-sidx="sIdx">
+                        <div v-for="(q, qIdx) in sec.questions" :key="q._uid" :id="`edq_${sIdx}_${qIdx}`" :class="q.type === 'group' ? 'reorder-group-wrapper' : 'reorder-question-row'">
+                          <template v-if="q.type === 'group'">
+                            <div class="reorder-question-row">
+                              <span class="gf-drag-handle gf-question-handle" title="Kéo để sắp xếp cả nhóm" aria-label="Kéo để sắp xếp cả nhóm">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>
+                              </span>
+                              <button
+                                type="button"
+                                class="btn btn-secondary btn-sm btn-icon !w-7 !min-w-[28px] !h-7 !min-h-[28px] shrink-0"
+                                @click="toggleReorderGroup(q._uid)"
+                                :aria-expanded="isReorderGroupExpanded(q._uid)"
+                                :title="isReorderGroupExpanded(q._uid) ? 'Thu gọn nhóm' : 'Bung nhóm để sắp xếp câu con'"
+                                :aria-label="isReorderGroupExpanded(q._uid) ? 'Thu gọn nhóm' : 'Bung nhóm để sắp xếp câu con'"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="transition-transform duration-150" :class="{ 'rotate-90': isReorderGroupExpanded(q._uid) }" aria-hidden="true">
+                                  <polyline points="9 18 15 12 9 6"></polyline>
+                                </svg>
+                              </button>
+                              <span class="badge bg-teal-800 text-white border-teal-800 text-xs shrink-0">{{ getGroupRangeLabel(validatedData, sIdx, qIdx, q) }}</span>
+                              <span class="badge text-[11px] shrink-0">Nhóm · {{ q.questions.length }} câu</span>
+                              <span class="flex-1 min-w-0 truncate text-sm text-slate-700" :title="questionItemSnippet(q)">{{ questionItemSnippet(q) }}</span>
+                              <div class="flex items-center gap-1 shrink-0">
+                                <button type="button" class="btn btn-secondary btn-sm btn-icon" @click="moveQuestion(sec, qIdx, -1)" :disabled="qIdx === 0" title="Di chuyển nhóm lên" :aria-label="`Di chuyển nhóm ${qIdx + 1} lên`">↑</button>
+                                <button type="button" class="btn btn-secondary btn-sm btn-icon" @click="moveQuestion(sec, qIdx, 1)" :disabled="qIdx === sec.questions.length - 1" title="Di chuyển nhóm xuống" :aria-label="`Di chuyển nhóm ${qIdx + 1} xuống`">↓</button>
+                              </div>
+                            </div>
+                            <div v-if="isReorderGroupExpanded(q._uid)" class="reorder-subquestions-stack space-y-1.5" :data-sidx="sIdx" :data-qidx="qIdx">
+                              <div v-for="(subQ, subIdx) in q.questions" :key="subQ._uid" :id="`edq_${sIdx}_${qIdx}_${subIdx}`" class="reorder-subquestion-row">
+                                <span class="gf-drag-handle gf-subquestion-handle" title="Kéo để sắp xếp câu trong nhóm" aria-label="Kéo để sắp xếp câu trong nhóm">
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>
+                                </span>
+                                <span class="badge bg-teal-700 text-white border-teal-700 text-[11px] shrink-0">Câu {{ getQuestionDisplayNum(validatedData, sIdx, qIdx, subIdx) }}</span>
+                                <span class="badge text-[11px] shrink-0">{{ questionTypeShortLabel(subQ.type) }}</span>
+                                <span class="flex-1 min-w-0 truncate text-xs text-slate-700" :title="subQuestionReorderSnippet(subQ)">{{ subQuestionReorderSnippet(subQ) }}</span>
+                                <div class="flex items-center gap-1 shrink-0">
+                                  <button type="button" class="btn btn-secondary btn-sm btn-icon !w-7 !min-w-[28px] !h-7 !min-h-[28px]" @click="moveSubQuestion(q, subIdx, -1)" :disabled="subIdx === 0" title="Di chuyển câu con lên" :aria-label="`Di chuyển câu con ${subIdx + 1} lên`">↑</button>
+                                  <button type="button" class="btn btn-secondary btn-sm btn-icon !w-7 !min-w-[28px] !h-7 !min-h-[28px]" @click="moveSubQuestion(q, subIdx, 1)" :disabled="subIdx === q.questions.length - 1" title="Di chuyển câu con xuống" :aria-label="`Di chuyển câu con ${subIdx + 1} xuống`">↓</button>
+                                </div>
+                              </div>
+                            </div>
+                          </template>
+                          <template v-else>
+                            <span class="gf-drag-handle gf-question-handle" title="Kéo để sắp xếp câu" aria-label="Kéo để sắp xếp câu">
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>
+                            </span>
+                            <span class="badge bg-teal-700 text-white border-teal-700 text-xs shrink-0">Câu {{ getQuestionDisplayNum(validatedData, sIdx, qIdx) }}</span>
+                            <span class="badge text-[11px] shrink-0">{{ questionTypeShortLabel(q.type) }}</span>
+                            <span class="flex-1 min-w-0 truncate text-sm text-slate-700" :title="questionItemSnippet(q)">{{ questionItemSnippet(q) }}</span>
+                            <div class="flex items-center gap-1 shrink-0">
+                              <button type="button" class="btn btn-secondary btn-sm btn-icon" @click="moveQuestion(sec, qIdx, -1)" :disabled="qIdx === 0" title="Di chuyển lên" :aria-label="`Di chuyển câu ${qIdx + 1} lên`">↑</button>
+                              <button type="button" class="btn btn-secondary btn-sm btn-icon" @click="moveQuestion(sec, qIdx, 1)" :disabled="qIdx === sec.questions.length - 1" title="Di chuyển xuống" :aria-label="`Di chuyển câu ${qIdx + 1} xuống`">↓</button>
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+
+                <!-- Panel 4: Xem trước màn hình làm bài -->
+                <div v-else-if="editorLeftPanel === 'preview'" id="editor-panel-preview" role="tabpanel" aria-labelledby="btn-panel-preview" class="space-y-6 min-w-0">
+                  <section v-for="(sec, sIdx) in validatedData.sections" :key="sec._uid" class="min-w-0">
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-3.5 bg-slate-200 border-l-[5px] border-teal-700 px-3.5 py-2.5 rounded-md">
+                      <h2 class="m-0 text-base font-bold text-slate-900">{{ sec.title }}</h2>
+                      <span class="badge bg-white text-slate-800 border-slate-300 tabular-nums">{{ formatPointNum(editorPointsSummary.sectionMaxPoints[sIdx]) }} điểm</span>
+                    </div>
+                    <div class="grid gap-3.5 min-w-0">
+                      <template v-for="(q, qIdx) in sec.questions" :key="q._uid">
+                        <div v-if="q.type === 'group'" :id="`edq_${sIdx}_${qIdx}`" class="question-group-card">
+                          <div class="group-passage-box">
+                            <template v-if="q.title">
+                              <div class="flex flex-wrap items-center justify-between gap-2 pb-2 mb-2.5 border-b border-slate-200">
+                                <span class="font-bold text-[1.0625rem] leading-snug text-slate-900 break-words">{{ q.title }}</span>
+                                <div class="flex flex-wrap items-center gap-1.5 shrink-0">
+                                  <span class="badge bg-slate-100 text-slate-700 border-slate-200">{{ getGroupRangeLabel(validatedData, sIdx, qIdx, q) }}</span>
+                                  <span class="badge bg-slate-100 text-slate-700 border-slate-200 tabular-nums">{{ formatPointNum(getEditorQuestionMaxPoints(sIdx, qIdx)) }} đ</span>
+                                </div>
+                              </div>
+                              <div class="group-passage-content question-text m-0 text-[0.9875rem] leading-[1.7] text-slate-900 whitespace-normal" v-html="renderRichText(q.content)"></div>
+                            </template>
+                            <div v-else class="flex items-start justify-between gap-3">
+                              <div class="group-passage-content question-text flex-1 min-w-0 m-0 text-[0.9875rem] leading-[1.7] text-slate-900 whitespace-normal" v-html="renderRichText(q.content)"></div>
+                              <div class="flex flex-wrap items-center justify-end gap-1.5 shrink-0 pt-0.5">
+                                <span class="badge bg-slate-100 text-slate-700 border-slate-200">{{ getGroupRangeLabel(validatedData, sIdx, qIdx, q) }}</span>
+                                <span class="badge bg-slate-100 text-slate-700 border-slate-200 tabular-nums">{{ formatPointNum(getEditorQuestionMaxPoints(sIdx, qIdx)) }} đ</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div class="group-subquestions-list grid gap-3">
+                            <article v-for="(subQ, subIdx) in q.questions" :key="subQ._uid" :id="`edq_${sIdx}_${qIdx}_${subIdx}`" class="question-card group-subquestion-card">
+                              <div class="flex justify-between items-center gap-2.5 mb-2.5">
+                                <div class="flex items-center gap-2">
+                                  <span class="question-number">Câu {{ getQuestionDisplayNum(validatedData, sIdx, qIdx, subIdx) }}</span>
+                                  <span class="badge bg-slate-100 text-slate-700 border-slate-200 tabular-nums">{{ formatPointNum(getEditorQuestionMaxPoints(sIdx, qIdx, subIdx)) }} đ</span>
+                                </div>
+                              </div>
+                              <div v-if="hasSubQuestionText(subQ)" class="question-text m-0 mb-3 text-base font-medium text-slate-900 whitespace-normal" v-html="renderRichText(subQ.question)"></div>
+
+                              <template v-if="subQ.type === 'multiple_choice'">
+                                <div class="grid gap-2">
+                                  <div v-for="key in ['A','B','C','D']" :key="key" class="option-row is-locked">
+                                    <input type="radio" class="radio-input" disabled>
+                                    <span class="font-bold min-w-[20px]">{{ key }}.</span>
+                                    <span v-html="renderRichText(subQ.options[key])"></span>
+                                  </div>
+                                </div>
+                              </template>
+                              <template v-else-if="subQ.type === 'true_false'">
+                                <div class="grid gap-2.5">
+                                  <div v-for="(st, stIdx) in subQ.statements" :key="stIdx" class="statement-row">
+                                    <div class="flex-1 basis-[240px] text-slate-900">
+                                      <strong>{{ String.fromCharCode(97 + stIdx) }})</strong>
+                                      <span v-html="renderRichText(st.text)"></span>
+                                    </div>
+                                    <div class="inline-flex gap-2">
+                                      <button type="button" class="tf-btn" disabled>Đúng</button>
+                                      <button type="button" class="tf-btn" disabled>Sai</button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </template>
+                              <template v-else-if="subQ.type === 'short_answer'">
+                                <input type="text" class="short-input field-control w-full max-w-[380px] text-base bg-white border-slate-400" placeholder="Nhập câu trả lời..." disabled>
+                              </template>
+                            </article>
+                          </div>
+                        </div>
+
+                        <article v-else :id="`edq_${sIdx}_${qIdx}`" class="question-card">
+                          <div class="flex justify-between items-center gap-2.5 mb-2.5">
+                            <div class="flex items-center gap-2">
+                              <span class="question-number">Câu {{ getQuestionDisplayNum(validatedData, sIdx, qIdx) }}</span>
+                              <span class="badge bg-slate-100 text-slate-700 border-slate-200 tabular-nums">{{ formatPointNum(getEditorQuestionMaxPoints(sIdx, qIdx)) }} đ</span>
+                            </div>
+                          </div>
+                          <div class="question-text m-0 mb-3 text-base font-medium text-slate-900 whitespace-normal" v-html="renderRichText(q.question)"></div>
+
+                          <template v-if="q.type === 'multiple_choice'">
+                            <div class="grid gap-2">
+                              <div v-for="key in ['A','B','C','D']" :key="key" class="option-row is-locked">
+                                <input type="radio" class="radio-input" disabled>
+                                <span class="font-bold min-w-[20px]">{{ key }}.</span>
+                                <span v-html="renderRichText(q.options[key])"></span>
+                              </div>
+                            </div>
+                          </template>
+                          <template v-else-if="q.type === 'true_false'">
+                            <div class="grid gap-2.5">
+                              <div v-for="(st, stIdx) in q.statements" :key="stIdx" class="statement-row">
+                                <div class="flex-1 basis-[240px] text-slate-900">
+                                  <strong>{{ String.fromCharCode(97 + stIdx) }})</strong>
+                                  <span v-html="renderRichText(st.text)"></span>
+                                </div>
+                                <div class="inline-flex gap-2">
+                                  <button type="button" class="tf-btn" disabled>Đúng</button>
+                                  <button type="button" class="tf-btn" disabled>Sai</button>
+                                </div>
+                              </div>
+                            </div>
+                          </template>
+                          <template v-else-if="q.type === 'short_answer'">
+                            <input type="text" class="short-input field-control w-full max-w-[380px] text-base bg-white border-slate-400" placeholder="Nhập câu trả lời..." disabled>
+                          </template>
+                        </article>
+                      </template>
+                    </div>
+                  </section>
+                </div>
+              </template>
+            </div>
+          </div>
+          <div class="min-w-0">
+            <div id="monaco-container" class="w-full h-[calc(100vh-115px)] min-h-[680px] bg-white border-[1.5px] border-slate-400 rounded-[10px] overflow-hidden" :class="{ hidden: !monacoReady }"></div>
+            <textarea id="yaml-input" class="w-full h-[calc(100vh-115px)] min-h-[680px] p-3.5 font-['JetBrains_Mono','Fira_Code',Consolas,'Courier_New',monospace] text-sm leading-[1.55] text-slate-700 bg-white border-[1.5px] border-slate-400 rounded-[10px] resize-y [tab-size:2] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600" :class="{ hidden: monacoReady }" v-model="yamlText" @input="handleYamlInput" @keydown.tab.prevent="handleYamlTab" @click="onYamlTextareaCursor" @keyup="onYamlTextareaCursor" spellcheck="false" aria-label="Nội dung đề YAML" placeholder="Dán nội dung YAML của đề vào đây..."></textarea>
+          </div>
+        </div>
+      </section>
+
+      <!-- Màn hình 3: Làm bài & Kết quả -->
+      <section id="view-quiz" v-else-if="view === 'quiz'" class="pb-7" aria-labelledby="quiz-title">
+        <div class="sticky top-0 z-20 bg-white border border-slate-300 rounded-[10px] px-4 py-3 mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div class="min-w-0 flex-1 basis-[220px]">
+            <h1 id="quiz-title" class="m-0 text-lg font-bold text-slate-900 break-words">{{ activeExam ? activeExam.meta.title : '' }}</h1>
+            <div class="mt-0.5 flex flex-wrap items-center gap-2">
+              <div id="quiz-progress" class="text-sm text-slate-700 font-medium">{{ quizProgressText }}</div>
+              <span v-if="quizTurboMode" id="quiz-turbo-badge" class="badge bg-amber-50 text-amber-800 border-amber-300" title="Chế độ Turbo đang bật: biết đúng/sai &amp; xem giải thích ngay lập tức">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="text-amber-600 shrink-0">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                </svg>
+                <span>Turbo</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-end gap-2 shrink-0 max-w-full ml-auto">
+            <button id="btn-quiz-back" type="button" class="btn btn-secondary" @click="requestExitQuiz">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+              Quay lại
+            </button>
+
+            <button
+              v-if="gradeResult === null"
+              id="btn-timer-toggle"
+              type="button"
+              class="btn btn-secondary btn-icon"
+              @click="toggleQuizTimerPause"
+              :aria-label="quizTimerPaused ? 'Tiếp tục' : 'Tạm dừng'"
+              :title="quizTimerPaused ? 'Tiếp tục' : 'Tạm dừng'"
+              :aria-pressed="quizTimerPaused"
+            >
+              <svg v-if="quizTimerPaused" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <polygon points="6 4 20 12 6 20 6 4"></polygon>
+              </svg>
+              <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <rect x="6" y="4" width="4" height="16" rx="1"></rect>
+                <rect x="14" y="4" width="4" height="16" rx="1"></rect>
+              </svg>
+            </button>
+
+            <button id="btn-submit-quiz" type="button" class="btn btn-accent" :class="{ hidden: gradeResult !== null }" @click="requestSubmitQuiz">Nộp bài</button>
+
+            <div id="quiz-timer" class="flex items-center shrink-0">
+              <div
+                class="quiz-timer-pill"
+                :class="[`is-${quizTimerStatus}`, { 'is-paused': quizTimerPaused }]"
+                role="timer"
+                aria-live="off"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="shrink-0">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+                <span id="quiz-timer-display" ref="quizTimerDisplayRef" class="font-mono text-base font-bold tabular-nums tracking-tight">00:00</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="submit-confirm-banner" class="flex flex-wrap items-center justify-between gap-3 rounded-[10px] p-4 mb-[18px] border-[1.5px] border-orange-700 bg-orange-50" :class="{ hidden: !showSubmitConfirm }" role="alert">
+          <span id="submit-confirm-text">Còn {{ pendingUnanswered }} câu chưa hoàn thành. Bạn vẫn muốn nộp bài?</span>
+          <div class="flex flex-wrap items-center gap-2">
+            <button id="btn-confirm-submit" type="button" class="btn btn-accent" @click="finalizeSubmit">Nộp luôn</button>
+            <button id="btn-cancel-submit" type="button" class="btn btn-secondary" @click="showSubmitConfirm = false">Làm tiếp</button>
+          </div>
+        </div>
+
+        <div id="quiz-scoreboard" class="flex flex-wrap items-center justify-between gap-4 rounded-[10px] p-4 mb-[18px] border-[1.5px] border-teal-700 bg-white" :class="{ hidden: gradeResult === null }" aria-live="polite">
+          <template v-if="gradeResult">
+            <div>
+              <div class="flex flex-wrap items-center gap-2.5">
+                <div class="text-[2rem] font-bold text-teal-700 leading-[1.2]">{{ gradeResult.scale10 }} / 10 điểm</div>
+                <span v-if="quizAutoSubmitted" id="quiz-auto-submit-badge" class="badge badge-error">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polyline points="12 6 12 12 16 14"></polyline>
+                  </svg>
+                  Hết giờ — hệ thống đã tự động nộp bài
+                </span>
+              </div>
+              <div class="mt-1 text-slate-700">
+                Đúng trọn vẹn <strong>{{ gradeResult.fullCorrectCount }}/{{ gradeResult.totalQuestions }}</strong> câu
+                (Điểm đạt được: <strong>{{ formatPointNum(gradeResult.earnedPoints) }}/{{ formatPointNum(gradeResult.totalMaxPoints) }} đ</strong>)
+              </div>
+              <div id="quiz-scoreboard-time" class="mt-1.5 inline-flex items-center gap-1.5 text-sm font-medium text-slate-700">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="text-slate-500">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+                <span>
+                  Thời gian làm bài:
+                  <strong class="font-mono tabular-nums text-slate-900">{{ quizElapsedDisplay }}</strong><template v-if="quizTimerLimit > 0"> / {{ quizTimerLimit }} phút</template>
+                </span>
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button v-if="isReviewingHistory" id="btn-back-to-profile" type="button" class="btn btn-secondary" @click="openProfile('stats')">Về thống kê</button>
+              <button id="btn-retry-quiz" type="button" class="btn btn-primary" @click="retryQuiz">Làm lại đề này</button>
+              <button id="btn-back-to-list" type="button" class="btn btn-secondary" @click="goList">Về danh sách</button>
+            </div>
+          </template>
+        </div>
+
+        <div
+          class="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5 items-start"
+          v-if="activeExam"
+          :class="{ 'quiz-paused-blur': (quizTimerPaused || showExitQuizConfirm) && gradeResult === null }"
+          :aria-hidden="(quizTimerPaused || showExitQuizConfirm) && gradeResult === null ? 'true' : null"
+        >
+          <div id="quiz-body" class="min-w-0 space-y-[26px]">
+            <section v-for="(sec, sIdx) in activeExam.sections" :key="sIdx" class="min-w-0">
+              <div class="flex flex-wrap items-center justify-between gap-2 mb-3 bg-slate-200 border-l-[5px] border-teal-700 px-3 py-2 rounded-md">
+                <h2 class="m-0 text-lg font-bold text-slate-900">{{ sec.title }}</h2>
+                <span class="badge bg-white/80 text-slate-700 border-slate-300 tabular-nums">{{ formatPointNum(quizPointsSummary.sectionMaxPoints[sIdx]) }} điểm</span>
+              </div>
+              <div class="questions-stack grid gap-3.5 min-w-0">
+                <div
+                  v-for="(q, qIdx) in sec.questions"
+                  :key="`${sIdx}_${qIdx}`"
+                  v-memo="[activeExamId, richTextReady, q.type === 'group' ? getGroupAnswerSig(q, sIdx, qIdx) : userAnswers[`${sIdx}_${qIdx}`], q.type === 'group' ? '' : Boolean(turboChecked[`${sIdx}_${qIdx}`]), gradeResult, quizTurboMode, getQuizQuestionMaxPoints(sIdx, qIdx)]"
+                  class="min-w-0"
+                >
+                  <div v-if="q.type === 'group'" class="question-group-card">
+                    <div class="group-passage-box">
+                      <template v-if="q.title">
+                        <div class="flex flex-wrap items-center justify-between gap-2 pb-2 mb-2.5 border-b border-slate-200">
+                          <span class="font-bold text-[1.0625rem] leading-snug text-slate-900 break-words">{{ q.title }}</span>
+                          <div class="flex flex-wrap items-center gap-1.5 shrink-0">
+                            <span class="badge bg-slate-100 text-slate-700 border-slate-200">{{ getGroupRangeLabel(activeExam, sIdx, qIdx, q) }}</span>
+                            <span class="badge bg-slate-100 text-slate-700 border-slate-200 tabular-nums">{{ formatPointNum(getQuizQuestionMaxPoints(sIdx, qIdx)) }} đ</span>
+                          </div>
+                        </div>
+                        <div class="group-passage-content question-text m-0 text-[0.9875rem] leading-[1.7] text-slate-900 whitespace-normal" v-html="renderRichText(q.content)"></div>
+                      </template>
+                      <div v-else class="flex items-start justify-between gap-3">
+                        <div class="group-passage-content question-text flex-1 min-w-0 m-0 text-[0.9875rem] leading-[1.7] text-slate-900 whitespace-normal" v-html="renderRichText(q.content)"></div>
+                        <div class="flex flex-wrap items-center justify-end gap-1.5 shrink-0 pt-0.5">
+                          <span class="badge bg-slate-100 text-slate-700 border-slate-200">{{ getGroupRangeLabel(activeExam, sIdx, qIdx, q) }}</span>
+                          <span class="badge bg-slate-100 text-slate-700 border-slate-200 tabular-nums">{{ formatPointNum(getQuizQuestionMaxPoints(sIdx, qIdx)) }} đ</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="group-subquestions-list grid gap-3">
+                      <article
+                        v-for="(subQ, subIdx) in q.questions"
+                        :key="`${sIdx}_${qIdx}_${subIdx}`"
+                        v-memo="[activeExamId, richTextReady, userAnswers[`${sIdx}_${qIdx}_${subIdx}`], Boolean(turboChecked[`${sIdx}_${qIdx}_${subIdx}`]), gradeResult, quizTurboMode, getQuizQuestionMaxPoints(sIdx, qIdx, subIdx)]"
+                        :id="`qcard_${sIdx}_${qIdx}_${subIdx}`"
+                        class="question-card group-subquestion-card"
+                        :class="quizCardClass(sIdx, qIdx, subIdx)"
+                      >
+                        <div class="flex justify-between items-center gap-2.5 mb-2.5">
+                          <div class="flex items-center gap-2">
+                            <span class="question-number">Câu {{ getQuestionDisplayNum(activeExam, sIdx, qIdx, subIdx) }}</span>
+                            <span class="badge bg-slate-100 text-slate-700 border-slate-200 tabular-nums">{{ formatPointNum(getQuizQuestionMaxPoints(sIdx, qIdx, subIdx)) }} đ</span>
+                          </div>
+                          <span v-if="isQuestionRevealed(sIdx, qIdx, subIdx)" class="badge bg-slate-200 text-slate-900" :class="quizBadgeClass(sIdx, qIdx, subIdx)">{{ quizBadgeText(sIdx, qIdx, subIdx) }}</span>
+                        </div>
+
+                        <div v-if="hasSubQuestionText(subQ)" class="question-text m-0 mb-3 text-base font-medium text-slate-900 whitespace-normal" v-html="renderRichText(subQ.question)"></div>
+
+                        <template v-if="subQ.type === 'multiple_choice'">
+                          <div class="grid gap-2">
+                            <label v-for="key in ['A','B','C','D']" :key="key" class="option-row" :class="quizOptionClass(subQ, sIdx, qIdx, key, subIdx)">
+                              <input type="radio" class="radio-input" :name="`q_${sIdx}_${qIdx}_${subIdx}`" :value="key" v-model="userAnswers[`${sIdx}_${qIdx}_${subIdx}`]" :disabled="isQuestionLocked(sIdx, qIdx, subIdx)" @change="onMcAnswerChange(sIdx, qIdx, subIdx)">
+                              <span class="font-bold min-w-[20px]">{{ key }}.</span>
+                              <span v-html="renderRichText(subQ.options[key])"></span>
+                            </label>
+                          </div>
+                          <div v-if="isQuestionRevealed(sIdx, qIdx, subIdx) && getDisplayDetail(sIdx, qIdx, subIdx) && !getDisplayDetail(sIdx, qIdx, subIdx).isFullCorrect" class="mt-2 text-sm font-semibold">
+                            Đáp án đúng: {{ subQ.answer }}
+                          </div>
+                        </template>
+
+                        <template v-else-if="subQ.type === 'true_false'">
+                          <div class="grid gap-2.5">
+                            <div v-for="(st, stIdx) in subQ.statements" :key="stIdx" class="statement-row" :class="quizStatementClass(sIdx, qIdx, stIdx, subIdx)">
+                              <div class="flex-1 basis-[240px] text-slate-900">
+                                <strong>{{ String.fromCharCode(97 + stIdx) }})</strong>
+                                <span v-html="renderRichText(st.text)"></span>
+                                <span v-if="isTfStatementRevealed(sIdx, qIdx, stIdx, subIdx)" class="badge ml-1" :class="getStatementDisplayResult(sIdx, qIdx, stIdx, subIdx)?.isCorrect ? 'badge-success' : 'badge-error'">
+                                  Đáp án: {{ st.is_true ? 'Đúng' : 'Sai' }}
+                                </span>
+                              </div>
+                              <div class="inline-flex gap-2">
+                                <button type="button" class="tf-btn" :aria-pressed="getTfPick(sIdx, qIdx, stIdx, subIdx) === true" :disabled="isTfStatementRevealed(sIdx, qIdx, stIdx, subIdx)" @click="setTfPick(sIdx, qIdx, stIdx, true, subIdx)">Đúng</button>
+                                <button type="button" class="tf-btn" :aria-pressed="getTfPick(sIdx, qIdx, stIdx, subIdx) === false" :disabled="isTfStatementRevealed(sIdx, qIdx, stIdx, subIdx)" @click="setTfPick(sIdx, qIdx, stIdx, false, subIdx)">Sai</button>
+                              </div>
+                            </div>
+                          </div>
+                        </template>
+
+                        <template v-else-if="subQ.type === 'short_answer'">
+                          <div class="flex flex-wrap items-center gap-2">
+                            <input type="text" class="short-input field-control flex-1 min-w-[180px] max-w-[380px] text-base bg-white border-slate-400" :class="quizShortInputClass(sIdx, qIdx, subIdx)" v-model="userAnswers[`${sIdx}_${qIdx}_${subIdx}`]" placeholder="Nhập câu trả lời..." :aria-label="`Đáp án câu ${getQuestionDisplayNum(activeExam, sIdx, qIdx, subIdx)}`" :disabled="isQuestionLocked(sIdx, qIdx, subIdx)" @keydown.enter.prevent="checkShortAnswerTurbo(sIdx, qIdx, subIdx)">
+                            <button v-if="quizTurboMode && !isQuestionLocked(sIdx, qIdx, subIdx)" type="button" class="btn btn-primary btn-sm shrink-0" data-action="check-short" @click="checkShortAnswerTurbo(sIdx, qIdx, subIdx)">Kiểm tra</button>
+                          </div>
+                          <div v-if="isQuestionRevealed(sIdx, qIdx, subIdx)" class="mt-2.5 text-sm font-semibold">
+                            Đáp án chấp nhận: {{ subQ.accepted_answers.join(' | ') }}
+                          </div>
+                        </template>
+
+                        <div v-if="isQuestionRevealed(sIdx, qIdx, subIdx) && subQ.explanation" class="mt-2.5 px-3 py-2.5 rounded-md bg-slate-200 text-slate-700 text-sm whitespace-normal">
+                          <strong>Giải thích:</strong> <span v-html="renderRichText(subQ.explanation)"></span>
+                        </div>
+                      </article>
+                    </div>
+                  </div>
+
+                  <article v-else :id="`qcard_${sIdx}_${qIdx}`" class="question-card" :class="quizCardClass(sIdx, qIdx)">
+                    <div class="flex justify-between items-center gap-2.5 mb-2">
+                      <div class="flex items-center gap-2">
+                        <span class="question-number">Câu {{ getQuestionDisplayNum(activeExam, sIdx, qIdx) }}</span>
+                        <span class="badge bg-slate-100 text-slate-700 border-slate-200 tabular-nums">{{ formatPointNum(getQuizQuestionMaxPoints(sIdx, qIdx)) }} đ</span>
+                      </div>
+                      <span v-if="isQuestionRevealed(sIdx, qIdx)" class="badge bg-slate-200 text-slate-900" :class="quizBadgeClass(sIdx, qIdx)">{{ quizBadgeText(sIdx, qIdx) }}</span>
+                    </div>
+                    <div class="question-text m-0 mb-3.5 text-base font-medium text-slate-900 whitespace-normal" v-html="renderRichText(q.question)"></div>
+
+                    <template v-if="q.type === 'multiple_choice'">
+                      <div class="grid gap-2">
+                        <label v-for="key in ['A','B','C','D']" :key="key" class="option-row" :class="quizOptionClass(q, sIdx, qIdx, key)">
+                          <input type="radio" class="radio-input" :name="`q_${sIdx}_${qIdx}`" :value="key" v-model="userAnswers[`${sIdx}_${qIdx}`]" :disabled="isQuestionLocked(sIdx, qIdx)" @change="onMcAnswerChange(sIdx, qIdx)">
+                          <span class="font-bold min-w-[22px]">{{ key }}.</span>
+                          <span v-html="renderRichText(q.options[key])"></span>
+                        </label>
+                      </div>
+                      <div v-if="isQuestionRevealed(sIdx, qIdx) && getDisplayDetail(sIdx, qIdx) && !getDisplayDetail(sIdx, qIdx).isFullCorrect" class="mt-2.5 text-sm font-semibold">
+                        Đáp án đúng: {{ q.answer }}
+                      </div>
+                    </template>
+
+                    <template v-else-if="q.type === 'true_false'">
+                      <div class="grid gap-2.5">
+                        <div v-for="(st, stIdx) in q.statements" :key="stIdx" class="statement-row" :class="quizStatementClass(sIdx, qIdx, stIdx)">
+                          <div class="flex-1 basis-[240px] text-slate-900">
+                            <strong>{{ String.fromCharCode(97 + stIdx) }})</strong>
+                            <span v-html="renderRichText(st.text)"></span>
+                            <span v-if="isTfStatementRevealed(sIdx, qIdx, stIdx)" class="badge ml-1" :class="getStatementDisplayResult(sIdx, qIdx, stIdx)?.isCorrect ? 'badge-success' : 'badge-error'">
+                              Đáp án: {{ st.is_true ? 'Đúng' : 'Sai' }}
+                            </span>
+                          </div>
+                          <div class="inline-flex gap-2">
+                            <button type="button" class="tf-btn" :aria-pressed="getTfPick(sIdx, qIdx, stIdx) === true" :disabled="isTfStatementRevealed(sIdx, qIdx, stIdx)" @click="setTfPick(sIdx, qIdx, stIdx, true)">Đúng</button>
+                            <button type="button" class="tf-btn" :aria-pressed="getTfPick(sIdx, qIdx, stIdx) === false" :disabled="isTfStatementRevealed(sIdx, qIdx, stIdx)" @click="setTfPick(sIdx, qIdx, stIdx, false)">Sai</button>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+
+                    <template v-else-if="q.type === 'short_answer'">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <input type="text" class="short-input field-control flex-1 min-w-[180px] max-w-[380px] text-base bg-white border-slate-400" :class="quizShortInputClass(sIdx, qIdx)" v-model="userAnswers[`${sIdx}_${qIdx}`]" placeholder="Nhập câu trả lời..." :aria-label="`Đáp án câu ${getQuestionDisplayNum(activeExam, sIdx, qIdx)}`" :disabled="isQuestionLocked(sIdx, qIdx)" @keydown.enter.prevent="checkShortAnswerTurbo(sIdx, qIdx)">
+                        <button v-if="quizTurboMode && !isQuestionLocked(sIdx, qIdx)" type="button" class="btn btn-primary btn-sm shrink-0" data-action="check-short" @click="checkShortAnswerTurbo(sIdx, qIdx)">Kiểm tra</button>
+                      </div>
+                      <div v-if="isQuestionRevealed(sIdx, qIdx)" class="mt-2.5 text-sm font-semibold">
+                        Đáp án chấp nhận: {{ q.accepted_answers.join(' | ') }}
+                      </div>
+                    </template>
+
+                    <div v-if="isQuestionRevealed(sIdx, qIdx) && q.explanation" class="mt-2.5 px-3 py-2.5 rounded-md bg-slate-200 text-slate-700 text-sm whitespace-normal">
+                      <strong>Giải thích:</strong> <span v-html="renderRichText(q.explanation)"></span>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <aside id="quiz-nav" class="bg-white border border-slate-300 rounded-[10px] p-3.5 lg:sticky lg:top-[88px] lg:max-h-[calc(100vh-108px)] lg:overflow-y-auto" aria-label="Bảng câu hỏi">
+            <h2 class="m-0 mb-3 text-[0.9375rem] font-bold text-slate-900">Bảng câu hỏi</h2>
+            <div v-for="(sec, sIdx) in activeExam.sections" :key="sIdx" :class="sIdx > 0 ? 'mt-3.5 pt-3 border-t border-slate-300' : ''">
+              <div class="text-[0.8125rem] font-bold text-slate-700 mb-2">{{ sec.title }}</div>
+              <div class="grid grid-cols-5 gap-2">
+                <button v-for="item in (quizSectionNavItems[sIdx] || [])" :key="item.key" v-memo="[userAnswers[item.key], Boolean(turboChecked[item.key]), gradeResult, quizTurboMode, item.num]" type="button" class="nav-cell" :class="quizNavCellClass(item.q, item.sIdx, item.qIdx, item.subIdx)" :aria-label="`Đi tới Phần ${sIdx + 1}, câu ${item.num}`" @click="scrollToQuestion(item.sIdx, item.qIdx, item.subIdx)">
+                  {{ item.num }}
+                </button>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-2.5 mt-3.5 pt-2.5 border-t border-slate-300 text-xs text-slate-700">
+              <template v-if="gradeResult || quizTurboMode">
+                <span class="inline-flex items-center gap-[5px]"><span class="w-3 h-3 rounded-[3px] border border-emerald-700 bg-emerald-700"></span>Đúng</span>
+                <span class="inline-flex items-center gap-[5px]"><span class="w-3 h-3 rounded-[3px] border border-amber-600 bg-amber-600"></span>1 phần</span>
+                <span class="inline-flex items-center gap-[5px]"><span class="w-3 h-3 rounded-[3px] border border-red-700 bg-red-700"></span>Sai</span>
+              </template>
+              <template v-if="!gradeResult">
+                <span class="inline-flex items-center gap-[5px]"><span class="w-3 h-3 rounded-[3px] border border-teal-700 bg-teal-700"></span>Đã làm</span>
+                <span class="inline-flex items-center gap-[5px]"><span class="w-3 h-3 rounded-[3px] border border-slate-400 bg-white"></span>Chưa làm</span>
+              </template>
+            </div>
+          </aside>
+        </div>
+
+        <div
+          v-if="showExitQuizConfirm && gradeResult === null"
+          id="quiz-exit-overlay"
+          class="quiz-pause-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="quiz-exit-title"
+        >
+          <div class="quiz-pause-card">
+            <div class="mx-auto mb-3 inline-flex items-center justify-center w-16 h-16 rounded-full bg-orange-50 text-orange-700 border border-orange-200" aria-hidden="true">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+              </svg>
+            </div>
+            <h2 id="quiz-exit-title" class="m-0 text-lg font-bold text-slate-900">Bạn có chắc chắn muốn thoát?</h2>
+            <p class="mt-1.5 mb-4 text-sm text-slate-600">Tiến trình làm bài và thời gian hiện tại sẽ được lưu lại để bạn tiếp tục sau.</p>
+            <div class="flex flex-col gap-2">
+              <button id="btn-confirm-exit-quiz" type="button" class="btn btn-primary w-full" @click="confirmExitQuiz">Lưu &amp; Thoát</button>
+              <button id="btn-cancel-exit-quiz" type="button" class="btn btn-secondary w-full" @click="cancelExitQuiz">Ở lại làm tiếp</button>
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-else-if="quizTimerPaused && gradeResult === null"
+          id="quiz-pause-overlay"
+          class="quiz-pause-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="quiz-pause-title"
+        >
+          <div class="quiz-pause-card">
+            <div class="mx-auto mb-3 inline-flex items-center justify-center w-16 h-16 rounded-full bg-teal-50 text-teal-700 border border-teal-200" aria-hidden="true">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="10" y1="9" x2="10" y2="15"></line>
+                <line x1="14" y1="9" x2="14" y2="15"></line>
+              </svg>
+            </div>
+            <h2 id="quiz-pause-title" class="m-0 text-lg font-bold text-slate-900">Đã tạm dừng làm bài</h2>
+            <p class="mt-1.5 mb-4 text-sm text-slate-600">Nội dung đề đang được ẩn trong lúc tạm dừng.</p>
+            <button id="btn-resume-quiz" type="button" class="btn btn-primary w-full" @click="toggleQuizTimerPause">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <polygon points="6 4 20 12 6 20 6 4"></polygon>
+              </svg>
+              Tiếp tục làm bài
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Màn hình 4: Hồ sơ & Thống kê học tập -->
+      <section id="view-profile" v-else-if="view === 'profile'" class="pb-8" aria-labelledby="profile-heading">
+        <header class="bg-white border border-slate-300 rounded-[12px] p-4 mb-4 shadow-[0_1px_2px_rgba(15,23,42,0.05)]">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-3 min-w-0">
+              <button id="btn-profile-back" type="button" class="btn btn-secondary" @click="goList">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="15 18 9 12 15 6"></polyline>
+                </svg>
+                Quay lại
+              </button>
+              <div class="flex items-center gap-2.5 min-w-0">
+                <span class="w-10 h-10 rounded-full bg-teal-700 text-white inline-flex items-center justify-center font-bold text-base shrink-0" aria-hidden="true">
+                  {{ (userProfile.displayName || 'H').trim().charAt(0).toUpperCase() || 'H' }}
+                </span>
+                <div class="min-w-0">
+                  <h1 id="profile-heading" class="m-0 text-xs font-bold uppercase tracking-wider text-slate-500">Hồ sơ học tập</h1>
+                  <input
+                    id="profile-name-input"
+                    type="text"
+                    v-model.trim="userProfile.displayName"
+                    @change="saveProfileName"
+                    @blur="saveProfileName"
+                    placeholder="Tên học sinh..."
+                    aria-label="Tên hiển thị"
+                    class="inline-input !px-1.5 !py-0.5 text-lg font-bold text-slate-900 max-w-[240px]"
+                  >
+                </div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 w-full lg:w-auto">
+              <div class="px-3.5 py-2 rounded-[10px] bg-teal-50/70 border border-teal-200">
+                <div class="text-xs font-semibold text-teal-800">ĐTB chung</div>
+                <div id="kpi-avg-score" class="text-xl font-bold text-teal-700 tabular-nums">{{ profileKpis.avgScore }} <span class="text-xs font-semibold text-slate-500">/ 10</span></div>
+              </div>
+              <div class="px-3.5 py-2 rounded-[10px] bg-slate-50 border border-slate-200">
+                <div class="text-xs font-semibold text-slate-600">Tổng lượt làm</div>
+                <div id="kpi-total-attempts" class="text-xl font-bold text-slate-900 tabular-nums">{{ profileKpis.totalAttempts }} <span class="text-xs font-semibold text-slate-500">bài</span></div>
+              </div>
+              <div class="px-3.5 py-2 rounded-[10px] bg-slate-50 border border-slate-200">
+                <div class="text-xs font-semibold text-slate-600">Thời gian tích lũy</div>
+                <div id="kpi-total-time" class="text-xl font-bold text-slate-900 tabular-nums">{{ profileKpis.totalDurationText }}</div>
+              </div>
+              <div class="px-3.5 py-2 rounded-[10px] bg-orange-50/80 border border-orange-200">
+                <div class="text-xs font-semibold text-orange-800">Streak hiện tại</div>
+                <div id="kpi-current-streak" class="text-xl font-bold text-orange-700 tabular-nums">{{ profileKpis.currentStreak }} <span class="text-xs font-semibold text-orange-700/80">ngày</span></div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <!-- Điểm trung bình các môn -->
+        <div id="profile-subject-averages" class="bg-white border border-slate-300 rounded-[12px] p-4 mb-4 shadow-[0_1px_2px_rgba(15,23,42,0.05)]">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div class="flex items-center gap-2">
+              <span class="w-8 h-8 rounded-lg bg-teal-50 border border-teal-200 text-teal-700 inline-flex items-center justify-center shrink-0" aria-hidden="true">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 10v6M2 10l10-5 10 5-10 5z"></path>
+                  <path d="M6 12v5c3 3 9 3 12 0v-5"></path>
+                </svg>
+              </span>
+              <div>
+                <h2 class="m-0 text-base font-bold text-slate-900">Điểm trung bình các môn</h2>
+                <p class="m-0 text-xs text-slate-500">Nhấn vào môn học để xem lịch sử làm bài của môn đó</p>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="subjectAverages.length === 0" class="text-center py-6 px-4 rounded-lg bg-slate-50 border border-dashed border-slate-300 text-sm text-slate-600">
+            Chưa có dữ liệu điểm các môn. Hãy hoàn thành và nộp ít nhất 1 đề để xem thống kê ĐTB.
+          </div>
+          <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <button
+              v-for="item in subjectAverages"
+              :key="item.subject"
+              type="button"
+              class="subject-gpa-card text-left p-3.5 rounded-[10px] border border-slate-200 bg-slate-50/60 hover:bg-white hover:border-teal-600 transition-colors cursor-pointer"
+              @click="filterHistoryBySubject(item.subject)"
+            >
+              <div class="flex items-center justify-between gap-2 mb-1.5">
+                <span class="font-bold text-sm text-slate-900 truncate">{{ item.subject }}</span>
+                <span class="badge text-xs">{{ item.attempts }} bài</span>
+              </div>
+              <div class="flex items-baseline justify-between gap-2 mb-2">
+                <div class="text-2xl font-bold text-slate-900 tabular-nums">
+                  {{ item.avgScore }}<span class="text-xs font-semibold text-slate-500">/10</span>
+                </div>
+                <div class="text-xs text-slate-600">
+                  Cao nhất: <strong class="text-slate-900 tabular-nums">{{ item.bestScore }}</strong> · {{ item.totalDurationText }}
+                </div>
+              </div>
+              <div class="score-bar-track">
+                <div class="score-bar-fill" :class="`is-${item.level}`" :style="{ width: `${item.scorePercent}%` }"></div>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Thanh Tab điều hướng giống ảnh mẫu -->
+        <nav class="flex flex-wrap items-center justify-center gap-2 sm:gap-6 border-b border-slate-300 mb-4 bg-white rounded-t-[12px] px-4 pt-1" aria-label="Chế độ xem thống kê">
+          <button
+            id="tab-btn-diligence"
+            type="button"
+            class="profile-tab"
+            :class="{ 'is-active': profileTab === 'diligence' }"
+            :aria-selected="profileTab === 'diligence'"
+            @click="profileTab = 'diligence'"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="text-orange-600">
+              <path d="M12 2c1.5 3.5 4 5.5 4 9a4 4 0 1 1-8 0c0-1.5.5-3 1.5-4.5C10.5 8 12 5 12 2z"></path>
+            </svg>
+            Độ chăm chỉ
+          </button>
+          <button
+            id="tab-btn-stats"
+            type="button"
+            class="profile-tab"
+            :class="{ 'is-active': profileTab === 'stats' }"
+            :aria-selected="profileTab === 'stats'"
+            @click="profileTab = 'stats'"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="18" y1="20" x2="18" y2="10"></line>
+              <line x1="12" y1="20" x2="12" y2="4"></line>
+              <line x1="6" y1="20" x2="6" y2="14"></line>
+            </svg>
+            Thống kê &amp; lịch sử làm bài
+          </button>
+        </nav>
+
+        <!-- TAB 1: Độ chăm chỉ (Lịch tháng chọn tuần + Streak + Số bài làm trong tuần) -->
+        <div v-if="profileTab === 'diligence'" id="profile-panel-diligence" class="bg-white border border-slate-300 rounded-[14px] p-4 sm:p-6 shadow-[0_1px_3px_rgba(15,23,42,0.05)]">
+          <div class="grid grid-cols-1 lg:grid-cols-[1fr_1.15fr] gap-6 items-start">
+            <!-- Cột trái: Quá trình học tập của bạn -->
+            <div class="min-w-0 lg:pr-5 lg:border-r lg:border-slate-200">
+              <div class="flex items-start gap-3 mb-4">
+                <span class="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 text-slate-700 inline-flex items-center justify-center shrink-0" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                    <path d="m9 16 2 2 4-4"></path>
+                  </svg>
+                </span>
+                <div>
+                  <h2 class="m-0 text-base font-bold text-slate-900">Quá trình học tập của bạn</h2>
+                  <p class="m-0 text-xs text-slate-500">Nhấn vào tuần để xem chi tiết số bài làm trong ngày</p>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-2 mb-4">
+                <span id="calendar-month-label" class="inline-flex items-center px-3.5 py-1.5 rounded-full text-sm font-bold bg-slate-100 border border-slate-300 text-slate-900">
+                  {{ monthCalendar.monthLabel }}
+                </span>
+                <button id="btn-cal-prev" type="button" class="btn btn-secondary btn-sm btn-icon" @click="shiftCalendarMonth(-1)" aria-label="Tháng trước" title="Tháng trước">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="15 18 9 12 15 6"></polyline>
+                  </svg>
+                </button>
+                <button id="btn-cal-next" type="button" class="btn btn-secondary btn-sm btn-icon" @click="shiftCalendarMonth(1)" aria-label="Tháng sau" title="Tháng sau">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                </button>
+              </div>
+
+              <div class="overflow-x-auto">
+                <div class="min-w-[320px]">
+                  <div class="grid grid-cols-[repeat(7,minmax(34px,1fr))_68px] gap-1 px-1.5 pb-2 text-center text-xs font-bold text-slate-500">
+                    <span>T2</span><span>T3</span><span>T4</span><span>T5</span><span>T6</span><span>T7</span><span>CN</span><span></span>
+                  </div>
+
+                  <div class="space-y-1.5">
+                    <div
+                      v-for="wk in monthCalendar.weeks"
+                      :key="wk.weekIndex"
+                      class="cal-week-row"
+                      :class="{ 'is-selected': selectedWeekIndex === wk.weekIndex }"
+                      :data-week-index="wk.weekIndex"
+                      @click="selectCalendarWeek(wk.weekIndex)"
+                    >
+                      <div
+                        v-for="d in wk.days"
+                        :key="d.dateKey"
+                        class="cal-day-pill"
+                        :class="{
+                          'is-outside': !d.inMonth,
+                          'is-active': d.count > 0,
+                          'is-today': d.isToday
+                        }"
+                        :title="`${d.dateKey}: ${d.count} bài`"
+                      >
+                        <span>{{ d.day }}</span>
+                        <span v-if="d.count > 0" class="cal-day-dot" aria-hidden="true"></span>
+                      </div>
+                      <button
+                        type="button"
+                        class="px-2 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer"
+                        :class="selectedWeekIndex === wk.weekIndex
+                          ? 'bg-white border-slate-500 text-slate-900 shadow-xs'
+                          : 'bg-transparent border-transparent text-slate-500 hover:text-slate-800'"
+                      >
+                        {{ wk.label }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-6 mt-5 pt-4 border-t border-slate-200">
+                <div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1">Streak hiện tại</div>
+                  <div id="diligence-current-streak" class="inline-flex items-center gap-1.5 text-lg font-bold text-slate-900 tabular-nums">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="text-orange-500">
+                      <path d="M12 2c1.5 3.5 4 5.5 4 9a4 4 0 1 1-8 0c0-1.5.5-3 1.5-4.5C10.5 8 12 5 12 2z"></path>
+                    </svg>
+                    {{ profileKpis.currentStreak }} ngày
+                  </div>
+                </div>
+                <div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1">Streak cao nhất</div>
+                  <div id="diligence-best-streak" class="inline-flex items-center gap-1.5 text-lg font-bold text-slate-900 tabular-nums">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="text-pink-600">
+                      <path d="M12 2c1.5 3.5 4 5.5 4 9a4 4 0 1 1-8 0c0-1.5.5-3 1.5-4.5C10.5 8 12 5 12 2z"></path>
+                    </svg>
+                    {{ profileKpis.bestStreak }} ngày
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Cột phải: Số bài làm trong tuần -->
+            <div class="min-w-0">
+              <div class="flex items-start gap-3 mb-4">
+                <span class="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 text-slate-700 inline-flex items-center justify-center shrink-0" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                  </svg>
+                </span>
+                <div>
+                  <h2 class="m-0 text-base font-bold text-slate-900">Số bài làm trong tuần</h2>
+                  <p id="weekly-range-label" class="m-0 text-xs font-medium text-slate-500">{{ weeklyBreakdown.rangeLabel }}</p>
+                </div>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="w-full min-w-[420px] border-collapse text-center text-sm">
+                  <thead>
+                    <tr>
+                      <th class="w-[110px] text-left py-2 pr-2 text-xs font-semibold text-slate-500">Môn học</th>
+                      <th
+                        v-for="d in weeklyBreakdown.days"
+                        :key="d.dateKey"
+                        class="py-2 px-1"
+                        :class="{ 'weekly-col-today': d.isToday }"
+                      >
+                        <div class="flex flex-col items-center gap-0.5">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" :class="d.hasActivity ? 'text-orange-500' : 'text-slate-300'">
+                            <path d="M12 2c1.5 3.5 4 5.5 4 9a4 4 0 1 1-8 0c0-1.5.5-3 1.5-4.5C10.5 8 12 5 12 2z"></path>
+                          </svg>
+                          <span class="text-xs font-bold text-slate-700">{{ d.dowLabel }}</span>
+                          <span class="text-[11px] font-medium text-slate-400 tabular-nums">{{ d.shortDate }}</span>
+                        </div>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100">
+                    <tr v-for="row in weeklyBreakdown.subjectRows" :key="row.subject">
+                      <td class="py-2 pr-2 text-left text-xs font-semibold text-slate-700 truncate max-w-[110px]" :title="row.subject">{{ row.subject }}</td>
+                      <td
+                        v-for="(cnt, idx) in row.countsByDay"
+                        :key="idx"
+                        class="py-2 px-1 font-semibold tabular-nums"
+                        :class="[
+                          weeklyBreakdown.days[idx]?.isToday ? 'weekly-col-today' : '',
+                          cnt > 0 ? 'text-teal-700 font-bold' : 'text-slate-400'
+                        ]"
+                      >
+                        {{ cnt > 0 ? cnt : '-' }}
+                      </td>
+                    </tr>
+                    <tr class="border-t border-dashed border-slate-200">
+                      <td class="py-2.5 pr-2 text-left text-xs font-bold text-slate-700">Tổng bài</td>
+                      <td
+                        v-for="d in weeklyBreakdown.days"
+                        :key="`sum_${d.dateKey}`"
+                        class="py-2.5 px-1 font-bold tabular-nums"
+                        :class="[d.isToday ? 'weekly-col-today' : '', d.count > 0 ? 'text-slate-900' : 'text-slate-400']"
+                      >
+                        {{ d.count > 0 ? d.count : '-' }}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td class="py-2 pr-2 text-left text-xs font-semibold text-slate-500">Thời gian</td>
+                      <td
+                        v-for="d in weeklyBreakdown.days"
+                        :key="`dur_${d.dateKey}`"
+                        class="py-2 px-1"
+                        :class="{ 'weekly-col-today': d.isToday }"
+                      >
+                        <span class="inline-block min-w-[40px] px-1.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600 tabular-nums">
+                          {{ d.durationText }}
+                        </span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-8 mt-5 pt-4 border-t border-slate-200">
+                <div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1">Tổng bài làm trong tuần</div>
+                  <div id="weekly-total-attempts" class="text-2xl font-bold text-slate-900 tabular-nums">{{ weeklyBreakdown.weekTotalAttempts }}</div>
+                </div>
+                <div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1">Tổng thời gian trong tuần</div>
+                  <div class="flex items-center gap-2">
+                    <span id="weekly-total-duration" class="text-2xl font-bold text-slate-900 tabular-nums">{{ weeklyBreakdown.weekTotalDurationText }}</span>
+                    <span id="weekly-avg-daily" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 tabular-nums">{{ weeklyBreakdown.avgDailyDurationText }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: Thống kê năm (Heatmap 365 ngày) & Lịch sử làm bài -->
+        <div v-else id="profile-panel-stats" class="space-y-4">
+          <!-- Card Heatmap 365 ngày -->
+          <div id="profile-year-heatmap" class="bg-white border border-slate-300 rounded-[14px] p-4 sm:p-6 shadow-[0_1px_3px_rgba(15,23,42,0.05)]">
+            <div class="flex flex-wrap items-center gap-2 mb-4">
+              <button
+                v-for="yr in yearHeatmap.availableYears"
+                :key="yr"
+                type="button"
+                class="px-3.5 py-1 rounded-full text-xs font-bold border transition-colors cursor-pointer"
+                :class="yearHeatmap.year === yr
+                  ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                  : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'"
+                @click="setHeatmapYear(yr)"
+              >
+                {{ yr }}
+              </button>
+            </div>
+
+            <div class="flex items-start gap-3 mb-4">
+              <span class="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 text-slate-700 inline-flex items-center justify-center shrink-0" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="16" y1="2" x2="16" y2="6"></line>
+                  <line x1="8" y1="2" x2="8" y2="6"></line>
+                  <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+              </span>
+              <div>
+                <h2 class="m-0 text-base font-bold text-slate-900">Thống kê năm {{ yearHeatmap.year }}</h2>
+                <p id="heatmap-summary-text" class="m-0 text-xs text-slate-500">
+                  Bạn đã làm được <strong class="text-slate-800">{{ yearHeatmap.activeDaysInYear }}</strong> trong {{ yearHeatmap.totalDaysInYear }} ngày
+                </p>
+              </div>
+            </div>
+
+            <div class="heatmap-scroll">
+              <div class="heatmap-board">
+                <div class="heatmap-dow-col" aria-hidden="true">
+                  <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+                </div>
+                <div class="heatmap-weeks-col">
+                  <div class="heatmap-weeks-grid" role="grid" :aria-label="`Biểu đồ nhiệt năm ${yearHeatmap.year}`">
+                    <div v-for="wk in yearHeatmap.weeks" :key="wk.weekIndex" class="heatmap-week">
+                      <span
+                        v-for="cell in wk.days"
+                        :key="cell.dateKey"
+                        class="heatmap-cell"
+                        :class="cell.inYear ? `level-${cell.level}` : 'is-out'"
+                        :title="cell.tooltip"
+                        :data-date="cell.inYear ? cell.dateKey : null"
+                      ></span>
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-12 text-xs font-semibold text-slate-500 pt-1" aria-hidden="true">
+                    <span v-for="m in yearHeatmap.monthLabels" :key="m.monthIndex">{{ m.label }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2 mt-4 text-xs font-medium text-slate-500">
+              <span>Không làm</span>
+              <span class="heatmap-cell level-0 inline-block"></span>
+              <span class="heatmap-cell level-1 inline-block"></span>
+              <span class="heatmap-cell level-2 inline-block"></span>
+              <span class="heatmap-cell level-3 inline-block"></span>
+              <span class="heatmap-cell level-4 inline-block"></span>
+              <span>Làm nhiều</span>
+            </div>
+          </div>
+
+          <!-- Card Lịch sử làm bài -->
+          <div id="profile-history-card" class="bg-white border border-slate-300 rounded-[14px] p-4 sm:p-6 shadow-[0_1px_3px_rgba(15,23,42,0.05)]">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div class="flex items-center gap-2">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="text-slate-700">
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                  <path d="M3 3v5h5"></path>
+                  <path d="M12 7v5l4 2"></path>
+                </svg>
+                <h2 class="m-0 text-base font-bold text-slate-900">Lịch sử làm bài</h2>
+                <span class="badge">{{ filteredHistoryList.length }} lượt</span>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2">
+                <select id="history-subject-select" v-model="historySubjectFilter" aria-label="Lọc lịch sử theo môn học" class="field-control !min-h-[38px] !py-1.5 text-xs">
+                  <option value="ALL">Môn: Tất cả</option>
+                  <option v-for="subj in historySubjectOptions" :key="subj" :value="subj">{{ subj }}</option>
+                </select>
+                <select id="history-range-select" v-model="historyRangeFilter" aria-label="Lọc lịch sử theo thời gian" class="field-control !min-h-[38px] !py-1.5 text-xs">
+                  <option value="all">Thời gian: Tất cả</option>
+                  <option value="7d">7 ngày qua</option>
+                  <option value="30d">30 ngày qua</option>
+                  <option value="year">Năm nay</option>
+                </select>
+                <button
+                  v-if="filteredHistoryList.length > 0"
+                  id="btn-clear-filtered-history"
+                  type="button"
+                  class="btn btn-secondary btn-sm !min-h-[38px] text-xs !text-red-600 hover:!border-red-300 hover:!bg-red-50"
+                  @click="requestClearFilteredHistory()"
+                >
+                  {{ historySubjectFilter === 'ALL' && historyRangeFilter === 'all' ? 'Xóa tất cả' : `Xóa ${filteredHistoryList.length} lượt lọc` }}
+                </button>
+              </div>
+            </div>
+
+            <div v-if="filteredHistoryList.length === 0" class="text-center py-8 px-4 rounded-lg bg-slate-50 border border-dashed border-slate-300 text-sm text-slate-600">
+              Chưa có lịch sử làm bài phù hợp với bộ lọc hiện tại.
+            </div>
+            <div v-else class="overflow-x-auto">
+              <table id="history-table" class="w-full min-w-[680px] border-collapse text-left text-sm">
+                <thead>
+                  <tr class="border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-slate-500">
+                    <th class="py-3 pr-3">Bài tập</th>
+                    <th class="py-3 px-3 w-[130px]">Kết quả</th>
+                    <th class="py-3 px-3 w-[130px]">Môn học</th>
+                    <th class="py-3 px-3 w-[110px]">Loại bài</th>
+                    <th class="py-3 px-3 w-[90px]">T/Gian</th>
+                    <th class="py-3 px-3 w-[120px]">Nộp lúc</th>
+                    <th class="py-3 pl-3 text-right w-[132px]">Hành động</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-200">
+                  <tr v-for="att in filteredHistoryList" :key="att.id" class="hover:bg-slate-50/80">
+                    <td class="py-3 pr-3">
+                      <div class="font-bold text-slate-900 line-clamp-2">{{ att.examTitle }}</div>
+                      <div class="text-xs text-slate-500">Đúng trọn vẹn {{ att.fullCorrectCount }}/{{ att.totalQuestions }} câu</div>
+                    </td>
+                    <td class="py-3 px-3">
+                      <div class="font-bold text-slate-900 tabular-nums mb-1">{{ att.scale10 }}/10</div>
+                      <div class="score-bar-track !h-2">
+                        <div
+                          class="score-bar-fill"
+                          :class="att.scale10 >= 8 ? 'is-excellent' : att.scale10 >= 6.5 ? 'is-good' : att.scale10 >= 5 ? 'is-fair' : 'is-low'"
+                          :style="{ width: `${Math.min(100, Math.max(0, Math.round(att.scale10 * 10)))}%` }"
+                        ></div>
+                      </div>
+                    </td>
+                    <td class="py-3 px-3 font-medium text-slate-700">{{ att.subject || 'Chưa phân loại' }}</td>
+                    <td class="py-3 px-3">
+                      <div class="font-medium text-slate-800">{{ att.limitMinutes > 0 ? `Thi thử (${att.limitMinutes}p)` : 'Luyện tập' }}</div>
+                      <div v-if="att.autoSubmitted" class="text-[11px] font-semibold text-red-600">Tự nộp hết giờ</div>
+                    </td>
+                    <td class="py-3 px-3 font-semibold text-slate-700 tabular-nums">{{ formatAttemptDuration(att.elapsedSeconds) }}</td>
+                    <td class="py-3 px-3 text-xs font-medium text-slate-600 tabular-nums whitespace-pre-line">{{ formatAttemptTime(att.submittedAt) }}</td>
+                    <td class="py-3 pl-3 text-right">
+                      <div class="inline-flex items-center justify-end gap-1">
+                        <button
+                          type="button"
+                          data-action="review-attempt"
+                          class="btn btn-secondary btn-sm btn-icon"
+                          @click="reviewHistoryAttempt(att)"
+                          title="Xem lại bài làm đã chấm"
+                          aria-label="Xem lại bài làm đã chấm"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="text-indigo-600">
+                            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          data-action="retry-attempt"
+                          class="btn btn-secondary btn-sm btn-icon"
+                          @click="retryHistoryAttempt(att)"
+                          title="Làm lại đề này"
+                          aria-label="Làm lại đề này"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="text-teal-700">
+                            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path>
+                            <path d="M21 3v5h-5"></path>
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          data-action="delete-attempt"
+                          class="btn btn-secondary btn-sm btn-icon hover:!border-red-300 hover:!bg-red-50"
+                          @click="requestDeleteHistoryAttempt(att)"
+                          title="Xóa lượt làm bài này"
+                          aria-label="Xóa lượt làm bài này"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="text-red-600">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                          </svg>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-if="deleteHistoryModal"
+          id="delete-history-modal"
+          class="quiz-pause-overlay z-40"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-history-title"
+          @click.self="deleteHistoryModal = null"
+        >
+          <div class="quiz-pause-card !max-w-[420px]">
+            <div class="mx-auto mb-3 inline-flex items-center justify-center w-14 h-14 rounded-full bg-red-50 text-red-600 border border-red-200" aria-hidden="true">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </div>
+            <h2 id="delete-history-title" class="m-0 text-lg font-bold text-slate-900">
+              <template v-if="deleteHistoryModal.mode === 'single'">Xóa lượt làm bài này?</template>
+              <template v-else>{{ deleteHistoryModal.isAll ? 'Xóa toàn bộ lịch sử làm bài?' : `Xóa ${deleteHistoryModal.count} lượt đang lọc?` }}</template>
+            </h2>
+            <p v-if="deleteHistoryModal.mode === 'single'" class="mt-2 mb-5 text-sm text-slate-600">
+              Lượt làm bài <strong>"{{ deleteHistoryModal.attempt.examTitle }}"</strong> ({{ deleteHistoryModal.attempt.scale10 }}/10) sẽ bị xóa khỏi lịch sử. ĐTB và thống kê sẽ được tính lại ngay.
+            </p>
+            <p v-else class="mt-2 mb-5 text-sm text-slate-600">
+              {{ deleteHistoryModal.count }} lượt làm bài đang chọn sẽ bị xóa vĩnh viễn khỏi lịch sử và toàn bộ ĐTB, biểu đồ thống kê sẽ được tính lại ngay.
+            </p>
+            <div class="flex flex-wrap items-center justify-end gap-2">
+              <button id="btn-delete-history-cancel" type="button" class="btn btn-secondary" @click="deleteHistoryModal = null">Hủy</button>
+              <button id="btn-delete-history-confirm" type="button" class="btn btn-danger" @click="confirmDeleteHistory()">Xác nhận xóa</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div
+        v-if="toast"
+        id="app-toast"
+        role="status"
+        aria-live="polite"
+        class="fixed bottom-5 right-5 z-50 flex items-center gap-2.5 max-w-[calc(100vw-2.5rem)] sm:max-w-sm px-4 py-3 rounded-[10px] border text-sm font-semibold shadow-lg transition-all"
+        :class="toast.type === 'error'
+          ? 'bg-red-50 border-red-300 text-red-800'
+          : 'bg-teal-700 border-teal-800 text-white'"
+      >
+        <svg v-if="toast.type === 'error'" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="shrink-0">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+        <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="shrink-0">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+          <polyline points="22 4 12 14.01 9 11.01"></polyline>
+        </svg>
+        <span>{{ toast.message }}</span>
+      </div>
+    </div>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

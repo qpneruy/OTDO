@@ -568,6 +568,60 @@ export function resolveExamPoints(exam) {
   };
 }
 
+export function gradeSingleQuestion(q, userAns, rawMaxPoints = 1) {
+  const maxPoints = Number((Number(rawMaxPoints) || 0).toFixed(4));
+
+  if (q.type === 'multiple_choice') {
+    const picked = typeof userAns === 'string' ? userAns : null;
+    const isUnanswered = !picked;
+    const isCorrect = picked === q.answer;
+    const score = isCorrect ? 1 : 0;
+    const earnedPoints = Number((score * maxPoints).toFixed(4));
+    return {
+      isUnanswered,
+      detail: { type: q.type, score, maxPoints, earnedPoints, isFullCorrect: isCorrect, userAns: picked }
+    };
+  }
+
+  if (q.type === 'true_false') {
+    const pickedMap = userAns && typeof userAns === 'object' && !Array.isArray(userAns) ? userAns : {};
+    let correctCount = 0;
+    let hasUnanswered = false;
+    const statementResults = q.statements.map((st, stIdx) => {
+      const picked = pickedMap[stIdx];
+      if (typeof picked !== 'boolean') hasUnanswered = true;
+      const isCorrect = picked === st.is_true;
+      if (isCorrect) correctCount++;
+      return { picked: typeof picked === 'boolean' ? picked : null, expected: st.is_true, isCorrect };
+    });
+
+    const score = q.statements.length === 4
+      ? [0, 0.1, 0.25, 0.5, 1.0][correctCount]
+      : correctCount / q.statements.length;
+    const earnedPoints = Number((score * maxPoints).toFixed(4));
+    const isFullCorrect = correctCount === q.statements.length;
+    return {
+      isUnanswered: hasUnanswered,
+      detail: { type: q.type, score, maxPoints, earnedPoints, isFullCorrect, correctCount, statementResults }
+    };
+  }
+
+  if (q.type === 'short_answer') {
+    const rawInput = typeof userAns === 'string' ? userAns : '';
+    const normInput = normalizeShortAnswer(rawInput);
+    const isUnanswered = !normInput;
+    const isCorrect = normInput !== '' && q.accepted_answers.some((a) => normalizeShortAnswer(a) === normInput);
+    const score = isCorrect ? 1 : 0;
+    const earnedPoints = Number((score * maxPoints).toFixed(4));
+    return {
+      isUnanswered,
+      detail: { type: q.type, score, maxPoints, earnedPoints, isFullCorrect: isCorrect, userAns: rawInput }
+    };
+  }
+
+  return { isUnanswered: true, detail: null };
+}
+
 export function gradeExam(exam, userAnswers = {}) {
   const pts = resolveExamPoints(exam);
   const details = {};
@@ -579,52 +633,13 @@ export function gradeExam(exam, userAnswers = {}) {
 
   const gradeLeafQuestion = (q, id) => {
     totalQuestions++;
-    const userAns = userAnswers[id];
-    const maxPoints = Number((pts.questionMaxPoints[id] ?? 0).toFixed(4));
-
-    if (q.type === 'multiple_choice') {
-      const picked = typeof userAns === 'string' ? userAns : null;
-      if (!picked) unansweredCount++;
-      const isCorrect = picked === q.answer;
-      const score = isCorrect ? 1 : 0;
-      const earnedPoints = Number((score * maxPoints).toFixed(4));
-      rawPoints += score;
-      sumEarnedPoints += score * maxPoints;
-      if (isCorrect) fullCorrectCount++;
-      details[id] = { type: q.type, score, maxPoints, earnedPoints, isFullCorrect: isCorrect, userAns: picked };
-    } else if (q.type === 'true_false') {
-      const pickedMap = userAns && typeof userAns === 'object' && !Array.isArray(userAns) ? userAns : {};
-      let correctCount = 0;
-      let hasUnanswered = false;
-      const statementResults = q.statements.map((st, stIdx) => {
-        const picked = pickedMap[stIdx];
-        if (typeof picked !== 'boolean') hasUnanswered = true;
-        const isCorrect = picked === st.is_true;
-        if (isCorrect) correctCount++;
-        return { picked: typeof picked === 'boolean' ? picked : null, expected: st.is_true, isCorrect };
-      });
-      if (hasUnanswered) unansweredCount++;
-
-      const score = q.statements.length === 4
-        ? [0, 0.1, 0.25, 0.5, 1.0][correctCount]
-        : correctCount / q.statements.length;
-      const earnedPoints = Number((score * maxPoints).toFixed(4));
-      const isFullCorrect = correctCount === q.statements.length;
-      rawPoints += score;
-      sumEarnedPoints += score * maxPoints;
-      if (isFullCorrect) fullCorrectCount++;
-      details[id] = { type: q.type, score, maxPoints, earnedPoints, isFullCorrect, correctCount, statementResults };
-    } else if (q.type === 'short_answer') {
-      const rawInput = typeof userAns === 'string' ? userAns : '';
-      const normInput = normalizeShortAnswer(rawInput);
-      if (!normInput) unansweredCount++;
-      const isCorrect = normInput !== '' && q.accepted_answers.some((a) => normalizeShortAnswer(a) === normInput);
-      const score = isCorrect ? 1 : 0;
-      const earnedPoints = Number((score * maxPoints).toFixed(4));
-      rawPoints += score;
-      sumEarnedPoints += score * maxPoints;
-      if (isCorrect) fullCorrectCount++;
-      details[id] = { type: q.type, score, maxPoints, earnedPoints, isFullCorrect: isCorrect, userAns: rawInput };
+    const { isUnanswered, detail } = gradeSingleQuestion(q, userAnswers[id], pts.questionMaxPoints[id] ?? 0);
+    if (isUnanswered) unansweredCount++;
+    if (detail) {
+      rawPoints += detail.score;
+      sumEarnedPoints += detail.score * detail.maxPoints;
+      if (detail.isFullCorrect) fullCorrectCount++;
+      details[id] = detail;
     }
   };
 

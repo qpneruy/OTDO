@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="tailwind.css">
   <link rel="stylesheet" href="style.css">
   <script type="importmap">
   {
@@ -693,7 +693,7 @@
       <section id="view-editor" v-else-if="view === 'editor'" aria-label="Soạn đề ôn tập">
         <header class="flex flex-wrap items-center justify-between gap-2.5 bg-white border border-slate-300 rounded-[10px] px-4 py-3 mb-4 shadow-[0_1px_2px_rgba(15,23,42,0.05)]">
           <div class="flex flex-wrap items-center gap-2 shrink-0">
-            <button id="btn-editor-back" type="button" class="btn btn-secondary" @click="goList">
+            <button id="btn-editor-back" type="button" class="btn btn-secondary" @click="requestExitEditor">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="15 18 9 12 15 6"></polyline>
               </svg>
@@ -1421,21 +1421,112 @@
             <textarea id="yaml-input" class="w-full h-[calc(100vh-115px)] min-h-[680px] p-3.5 font-['JetBrains_Mono','Fira_Code',Consolas,'Courier_New',monospace] text-sm leading-[1.55] text-slate-700 bg-white border-[1.5px] border-slate-400 rounded-[10px] resize-y [tab-size:2] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600" :class="{ hidden: monacoReady }" v-model="yamlText" @input="handleYamlInput" @keydown.tab.prevent="handleYamlTab" @click="onYamlTextareaCursor" @keyup="onYamlTextareaCursor" spellcheck="false" aria-label="Nội dung đề YAML" placeholder="Dán nội dung YAML của đề vào đây..."></textarea>
           </div>
         </div>
+
+        <div
+          v-if="showEditorExitConfirm"
+          id="editor-exit-overlay"
+          class="quiz-pause-overlay z-40"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="editor-exit-title"
+          @click.self="cancelExitEditor"
+        >
+          <div class="quiz-pause-card !max-w-[440px]">
+            <button
+              id="btn-editor-cancel-exit"
+              type="button"
+              class="btn-icon modal-close-btn"
+              aria-label="Ở lại biên tập"
+              title="Ở lại biên tập"
+              @click="cancelExitEditor"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+            <div class="mx-auto mb-3 inline-flex items-center justify-center w-14 h-14 rounded-full bg-amber-50 text-amber-700 border border-amber-200" aria-hidden="true">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+            </div>
+            <h2 id="editor-exit-title" class="m-0 text-lg font-bold text-slate-900">Bạn có thay đổi chưa lưu</h2>
+            <p class="mt-2 mb-4 text-sm text-slate-600">Bạn có muốn lưu lại các chỉnh sửa trước khi quay lại danh sách không?</p>
+            <p
+              v-if="!canSaveExam || !validatedData"
+              id="editor-exit-error-hint"
+              class="mt-0 mb-4 px-3 py-2 rounded-md bg-red-50 border border-red-200 text-xs font-semibold text-red-700"
+            >
+              YAML đang có lỗi, hãy sửa trước khi lưu.
+            </p>
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                id="btn-editor-discard-exit"
+                type="button"
+                class="btn btn-danger w-full"
+                @click="discardAndExitEditor"
+              >Không lưu</button>
+              <button
+                id="btn-editor-save-exit"
+                type="button"
+                class="btn btn-primary w-full"
+                :disabled="!canSaveExam || !validatedData"
+                @click="saveAndExitEditor"
+              >Lưu &amp; Quay lại</button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- Màn hình 3: Làm bài & Kết quả -->
       <section id="view-quiz" v-else-if="view === 'quiz'" class="pb-7" aria-labelledby="quiz-title">
-        <div class="sticky top-0 z-20 bg-white border border-slate-300 rounded-[10px] px-4 py-3 mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div id="quiz-header" class="sticky top-0 z-20 bg-white border border-slate-300 rounded-[10px] px-4 py-3 mb-5 flex flex-wrap items-center justify-between gap-3">
           <div class="min-w-0 flex-1 basis-[220px]">
             <h1 id="quiz-title" class="m-0 text-lg font-bold text-slate-900 break-words">{{ activeExam ? activeExam.meta.title : '' }}</h1>
-            <div class="mt-0.5 flex flex-wrap items-center gap-2">
-              <div id="quiz-progress" class="text-sm text-slate-700 font-medium">{{ quizProgressText }}</div>
+            <div class="mt-1 flex flex-wrap items-center gap-2">
+              <quiz-progress-text></quiz-progress-text>
               <span v-if="quizTurboMode" id="quiz-turbo-badge" class="badge bg-amber-50 text-amber-800 border-amber-300" title="Chế độ Turbo đang bật: biết đúng/sai &amp; xem giải thích ngay lập tức">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="text-amber-600 shrink-0">
                   <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
                 </svg>
                 <span>Turbo</span>
               </span>
+              <div v-if="quizTurboMode && gradeResult === null" id="quiz-turbo-actions" class="turbo-quiz-actions" role="group" aria-label="Thao tác chế độ Turbo">
+                <button
+                  id="btn-turbo-shuffle"
+                  type="button"
+                  class="btn btn-secondary btn-sm turbo-action-btn"
+                  :disabled="!canShuffleActiveExam"
+                  :title="canShuffleActiveExam ? 'Đảo thứ tự câu hỏi' : 'Đề chỉ có 1 câu mỗi phần nên không thể đảo'"
+                  aria-label="Đảo thứ tự câu hỏi"
+                  @click="shuffleTurboQuiz"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="shrink-0">
+                    <polyline points="16 3 21 3 21 8"></polyline>
+                    <line x1="4" y1="20" x2="21" y2="3"></line>
+                    <polyline points="21 16 21 21 16 21"></polyline>
+                    <line x1="15" y1="15" x2="21" y2="21"></line>
+                    <line x1="4" y1="4" x2="9" y2="9"></line>
+                  </svg>
+                  <span>Đảo câu</span>
+                </button>
+                <button
+                  id="btn-turbo-reset"
+                  type="button"
+                  class="btn btn-secondary btn-sm turbo-action-btn turbo-reset-btn"
+                  title="Xóa hết đáp án và làm lại từ đầu"
+                  aria-label="Xóa hết đáp án và làm lại từ đầu"
+                  @click="resetTurboQuiz"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="shrink-0">
+                    <path d="M3 12a9 9 0 1 0 3-6.7L3 8"></path>
+                    <path d="M3 3v5h5"></path>
+                  </svg>
+                  <span>Reset</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1523,6 +1614,14 @@
             </div>
             <div class="flex flex-wrap items-center gap-2">
               <button v-if="isReviewingHistory" id="btn-back-to-profile" type="button" class="btn btn-secondary" @click="openProfile('stats')">Về thống kê</button>
+              <button id="btn-export-quiz-result" type="button" class="btn btn-secondary" @click="exportCurrentQuizResult">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                Xuất bài làm
+              </button>
               <button id="btn-retry-quiz" type="button" class="btn btn-primary" @click="retryQuiz">Làm lại đề này</button>
               <button id="btn-back-to-list" type="button" class="btn btn-secondary" @click="goList">Về danh sách</button>
             </div>
@@ -1530,22 +1629,21 @@
         </div>
 
         <div
-          class="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5 items-start"
+          class="quiz-layout"
           v-if="activeExam"
           :class="{ 'quiz-paused-blur': (quizTimerPaused || showExitQuizConfirm) && gradeResult === null }"
           :aria-hidden="(quizTimerPaused || showExitQuizConfirm) && gradeResult === null ? 'true' : null"
         >
           <div id="quiz-body" class="min-w-0 space-y-[26px]">
-            <section v-for="(sec, sIdx) in activeExam.sections" :key="sIdx" class="min-w-0">
+            <section v-for="(sec, sIdx) in activeExam.sections" :key="`${quizRenderEpoch}_s_${sIdx}`" class="min-w-0">
               <div class="flex flex-wrap items-center justify-between gap-2 mb-3 bg-slate-200 border-l-[5px] border-teal-700 px-3 py-2 rounded-md">
                 <h2 class="m-0 text-lg font-bold text-slate-900">{{ sec.title }}</h2>
                 <span class="badge bg-white/80 text-slate-700 border-slate-300 tabular-nums">{{ formatPointNum(quizPointsSummary.sectionMaxPoints[sIdx]) }} điểm</span>
               </div>
-              <div class="questions-stack grid gap-3.5 min-w-0">
+              <div class="quiz-questions-stack min-w-0">
                 <div
                   v-for="(q, qIdx) in sec.questions"
-                  :key="`${sIdx}_${qIdx}`"
-                  v-memo="[activeExamId, richTextReady, q.type === 'group' ? getGroupAnswerSig(q, sIdx, qIdx) : userAnswers[`${sIdx}_${qIdx}`], q.type === 'group' ? '' : Boolean(turboChecked[`${sIdx}_${qIdx}`]), gradeResult, quizTurboMode, getQuizQuestionMaxPoints(sIdx, qIdx)]"
+                  :key="`${quizRenderEpoch}_${sIdx}_${qIdx}`"
                   class="min-w-0"
                 >
                   <div v-if="q.type === 'group'" class="question-group-card">
@@ -1554,7 +1652,7 @@
                         <div class="flex flex-wrap items-center justify-between gap-2 pb-2 mb-2.5 border-b border-slate-200">
                           <span class="font-bold text-[1.0625rem] leading-snug text-slate-900 break-words">{{ q.title }}</span>
                           <div class="flex flex-wrap items-center gap-1.5 shrink-0">
-                            <span class="badge bg-slate-100 text-slate-700 border-slate-200">{{ getGroupRangeLabel(activeExam, sIdx, qIdx, q) }}</span>
+                            <span class="badge bg-slate-100 text-slate-700 border-slate-200">{{ getQuizGroupRangeLabel(sIdx, qIdx) }}</span>
                             <span class="badge bg-slate-100 text-slate-700 border-slate-200 tabular-nums">{{ formatPointNum(getQuizQuestionMaxPoints(sIdx, qIdx)) }} đ</span>
                           </div>
                         </div>
@@ -1563,134 +1661,33 @@
                       <div v-else class="flex items-start justify-between gap-3">
                         <div class="group-passage-content question-text flex-1 min-w-0 m-0 text-[0.9875rem] leading-[1.7] text-slate-900 whitespace-normal" v-html="renderRichText(q.content)"></div>
                         <div class="flex flex-wrap items-center justify-end gap-1.5 shrink-0 pt-0.5">
-                          <span class="badge bg-slate-100 text-slate-700 border-slate-200">{{ getGroupRangeLabel(activeExam, sIdx, qIdx, q) }}</span>
+                          <span class="badge bg-slate-100 text-slate-700 border-slate-200">{{ getQuizGroupRangeLabel(sIdx, qIdx) }}</span>
                           <span class="badge bg-slate-100 text-slate-700 border-slate-200 tabular-nums">{{ formatPointNum(getQuizQuestionMaxPoints(sIdx, qIdx)) }} đ</span>
                         </div>
                       </div>
                     </div>
 
-                    <div class="group-subquestions-list grid gap-3">
-                      <article
+                    <div class="group-subquestions-list quiz-subquestions-stack">
+                      <quiz-leaf-question
                         v-for="(subQ, subIdx) in q.questions"
-                        :key="`${sIdx}_${qIdx}_${subIdx}`"
-                        v-memo="[activeExamId, richTextReady, userAnswers[`${sIdx}_${qIdx}_${subIdx}`], Boolean(turboChecked[`${sIdx}_${qIdx}_${subIdx}`]), gradeResult, quizTurboMode, getQuizQuestionMaxPoints(sIdx, qIdx, subIdx)]"
-                        :id="`qcard_${sIdx}_${qIdx}_${subIdx}`"
-                        class="question-card group-subquestion-card"
-                        :class="quizCardClass(sIdx, qIdx, subIdx)"
-                      >
-                        <div class="flex justify-between items-center gap-2.5 mb-2.5">
-                          <div class="flex items-center gap-2">
-                            <span class="question-number">Câu {{ getQuestionDisplayNum(activeExam, sIdx, qIdx, subIdx) }}</span>
-                            <span class="badge bg-slate-100 text-slate-700 border-slate-200 tabular-nums">{{ formatPointNum(getQuizQuestionMaxPoints(sIdx, qIdx, subIdx)) }} đ</span>
-                          </div>
-                          <span v-if="isQuestionRevealed(sIdx, qIdx, subIdx)" class="badge bg-slate-200 text-slate-900" :class="quizBadgeClass(sIdx, qIdx, subIdx)">{{ quizBadgeText(sIdx, qIdx, subIdx) }}</span>
-                        </div>
-
-                        <div v-if="hasSubQuestionText(subQ)" class="question-text m-0 mb-3 text-base font-medium text-slate-900 whitespace-normal" v-html="renderRichText(subQ.question)"></div>
-
-                        <template v-if="subQ.type === 'multiple_choice'">
-                          <div class="grid gap-2">
-                            <label v-for="key in ['A','B','C','D']" :key="key" class="option-row" :class="quizOptionClass(subQ, sIdx, qIdx, key, subIdx)">
-                              <input type="radio" class="radio-input" :name="`q_${sIdx}_${qIdx}_${subIdx}`" :value="key" v-model="userAnswers[`${sIdx}_${qIdx}_${subIdx}`]" :disabled="isQuestionLocked(sIdx, qIdx, subIdx)" @change="onMcAnswerChange(sIdx, qIdx, subIdx)">
-                              <span class="font-bold min-w-[20px]">{{ key }}.</span>
-                              <span v-html="renderRichText(subQ.options[key])"></span>
-                            </label>
-                          </div>
-                          <div v-if="isQuestionRevealed(sIdx, qIdx, subIdx) && getDisplayDetail(sIdx, qIdx, subIdx) && !getDisplayDetail(sIdx, qIdx, subIdx).isFullCorrect" class="mt-2 text-sm font-semibold">
-                            Đáp án đúng: {{ subQ.answer }}
-                          </div>
-                        </template>
-
-                        <template v-else-if="subQ.type === 'true_false'">
-                          <div class="grid gap-2.5">
-                            <div v-for="(st, stIdx) in subQ.statements" :key="stIdx" class="statement-row" :class="quizStatementClass(sIdx, qIdx, stIdx, subIdx)">
-                              <div class="flex-1 basis-[240px] text-slate-900">
-                                <strong>{{ String.fromCharCode(97 + stIdx) }})</strong>
-                                <span v-html="renderRichText(st.text)"></span>
-                                <span v-if="isTfStatementRevealed(sIdx, qIdx, stIdx, subIdx)" class="badge ml-1" :class="getStatementDisplayResult(sIdx, qIdx, stIdx, subIdx)?.isCorrect ? 'badge-success' : 'badge-error'">
-                                  Đáp án: {{ st.is_true ? 'Đúng' : 'Sai' }}
-                                </span>
-                              </div>
-                              <div class="inline-flex gap-2">
-                                <button type="button" class="tf-btn" :aria-pressed="getTfPick(sIdx, qIdx, stIdx, subIdx) === true" :disabled="isTfStatementRevealed(sIdx, qIdx, stIdx, subIdx)" @click="setTfPick(sIdx, qIdx, stIdx, true, subIdx)">Đúng</button>
-                                <button type="button" class="tf-btn" :aria-pressed="getTfPick(sIdx, qIdx, stIdx, subIdx) === false" :disabled="isTfStatementRevealed(sIdx, qIdx, stIdx, subIdx)" @click="setTfPick(sIdx, qIdx, stIdx, false, subIdx)">Sai</button>
-                              </div>
-                            </div>
-                          </div>
-                        </template>
-
-                        <template v-else-if="subQ.type === 'short_answer'">
-                          <div class="flex flex-wrap items-center gap-2">
-                            <input type="text" class="short-input field-control flex-1 min-w-[180px] max-w-[380px] text-base bg-white border-slate-400" :class="quizShortInputClass(sIdx, qIdx, subIdx)" v-model="userAnswers[`${sIdx}_${qIdx}_${subIdx}`]" placeholder="Nhập câu trả lời..." :aria-label="`Đáp án câu ${getQuestionDisplayNum(activeExam, sIdx, qIdx, subIdx)}`" :disabled="isQuestionLocked(sIdx, qIdx, subIdx)" @keydown.enter.prevent="checkShortAnswerTurbo(sIdx, qIdx, subIdx)">
-                            <button v-if="quizTurboMode && !isQuestionLocked(sIdx, qIdx, subIdx)" type="button" class="btn btn-primary btn-sm shrink-0" data-action="check-short" @click="checkShortAnswerTurbo(sIdx, qIdx, subIdx)">Kiểm tra</button>
-                          </div>
-                          <div v-if="isQuestionRevealed(sIdx, qIdx, subIdx)" class="mt-2.5 text-sm font-semibold">
-                            Đáp án chấp nhận: {{ subQ.accepted_answers.join(' | ') }}
-                          </div>
-                        </template>
-
-                        <div v-if="isQuestionRevealed(sIdx, qIdx, subIdx) && subQ.explanation" class="mt-2.5 px-3 py-2.5 rounded-md bg-slate-200 text-slate-700 text-sm whitespace-normal">
-                          <strong>Giải thích:</strong> <span v-html="renderRichText(subQ.explanation)"></span>
-                        </div>
-                      </article>
+                        :key="`${quizRenderEpoch}_${sIdx}_${qIdx}_${subIdx}`"
+                        :question="subQ"
+                        :s-idx="sIdx"
+                        :q-idx="qIdx"
+                        :sub-idx="subIdx"
+                        :is-sub="true"
+                      ></quiz-leaf-question>
                     </div>
                   </div>
 
-                  <article v-else :id="`qcard_${sIdx}_${qIdx}`" class="question-card" :class="quizCardClass(sIdx, qIdx)">
-                    <div class="flex justify-between items-center gap-2.5 mb-2">
-                      <div class="flex items-center gap-2">
-                        <span class="question-number">Câu {{ getQuestionDisplayNum(activeExam, sIdx, qIdx) }}</span>
-                        <span class="badge bg-slate-100 text-slate-700 border-slate-200 tabular-nums">{{ formatPointNum(getQuizQuestionMaxPoints(sIdx, qIdx)) }} đ</span>
-                      </div>
-                      <span v-if="isQuestionRevealed(sIdx, qIdx)" class="badge bg-slate-200 text-slate-900" :class="quizBadgeClass(sIdx, qIdx)">{{ quizBadgeText(sIdx, qIdx) }}</span>
-                    </div>
-                    <div class="question-text m-0 mb-3.5 text-base font-medium text-slate-900 whitespace-normal" v-html="renderRichText(q.question)"></div>
-
-                    <template v-if="q.type === 'multiple_choice'">
-                      <div class="grid gap-2">
-                        <label v-for="key in ['A','B','C','D']" :key="key" class="option-row" :class="quizOptionClass(q, sIdx, qIdx, key)">
-                          <input type="radio" class="radio-input" :name="`q_${sIdx}_${qIdx}`" :value="key" v-model="userAnswers[`${sIdx}_${qIdx}`]" :disabled="isQuestionLocked(sIdx, qIdx)" @change="onMcAnswerChange(sIdx, qIdx)">
-                          <span class="font-bold min-w-[22px]">{{ key }}.</span>
-                          <span v-html="renderRichText(q.options[key])"></span>
-                        </label>
-                      </div>
-                      <div v-if="isQuestionRevealed(sIdx, qIdx) && getDisplayDetail(sIdx, qIdx) && !getDisplayDetail(sIdx, qIdx).isFullCorrect" class="mt-2.5 text-sm font-semibold">
-                        Đáp án đúng: {{ q.answer }}
-                      </div>
-                    </template>
-
-                    <template v-else-if="q.type === 'true_false'">
-                      <div class="grid gap-2.5">
-                        <div v-for="(st, stIdx) in q.statements" :key="stIdx" class="statement-row" :class="quizStatementClass(sIdx, qIdx, stIdx)">
-                          <div class="flex-1 basis-[240px] text-slate-900">
-                            <strong>{{ String.fromCharCode(97 + stIdx) }})</strong>
-                            <span v-html="renderRichText(st.text)"></span>
-                            <span v-if="isTfStatementRevealed(sIdx, qIdx, stIdx)" class="badge ml-1" :class="getStatementDisplayResult(sIdx, qIdx, stIdx)?.isCorrect ? 'badge-success' : 'badge-error'">
-                              Đáp án: {{ st.is_true ? 'Đúng' : 'Sai' }}
-                            </span>
-                          </div>
-                          <div class="inline-flex gap-2">
-                            <button type="button" class="tf-btn" :aria-pressed="getTfPick(sIdx, qIdx, stIdx) === true" :disabled="isTfStatementRevealed(sIdx, qIdx, stIdx)" @click="setTfPick(sIdx, qIdx, stIdx, true)">Đúng</button>
-                            <button type="button" class="tf-btn" :aria-pressed="getTfPick(sIdx, qIdx, stIdx) === false" :disabled="isTfStatementRevealed(sIdx, qIdx, stIdx)" @click="setTfPick(sIdx, qIdx, stIdx, false)">Sai</button>
-                          </div>
-                        </div>
-                      </div>
-                    </template>
-
-                    <template v-else-if="q.type === 'short_answer'">
-                      <div class="flex flex-wrap items-center gap-2">
-                        <input type="text" class="short-input field-control flex-1 min-w-[180px] max-w-[380px] text-base bg-white border-slate-400" :class="quizShortInputClass(sIdx, qIdx)" v-model="userAnswers[`${sIdx}_${qIdx}`]" placeholder="Nhập câu trả lời..." :aria-label="`Đáp án câu ${getQuestionDisplayNum(activeExam, sIdx, qIdx)}`" :disabled="isQuestionLocked(sIdx, qIdx)" @keydown.enter.prevent="checkShortAnswerTurbo(sIdx, qIdx)">
-                        <button v-if="quizTurboMode && !isQuestionLocked(sIdx, qIdx)" type="button" class="btn btn-primary btn-sm shrink-0" data-action="check-short" @click="checkShortAnswerTurbo(sIdx, qIdx)">Kiểm tra</button>
-                      </div>
-                      <div v-if="isQuestionRevealed(sIdx, qIdx)" class="mt-2.5 text-sm font-semibold">
-                        Đáp án chấp nhận: {{ q.accepted_answers.join(' | ') }}
-                      </div>
-                    </template>
-
-                    <div v-if="isQuestionRevealed(sIdx, qIdx) && q.explanation" class="mt-2.5 px-3 py-2.5 rounded-md bg-slate-200 text-slate-700 text-sm whitespace-normal">
-                      <strong>Giải thích:</strong> <span v-html="renderRichText(q.explanation)"></span>
-                    </div>
-                  </article>
+                  <quiz-leaf-question
+                    v-else
+                    :question="q"
+                    :s-idx="sIdx"
+                    :q-idx="qIdx"
+                    :sub-idx="null"
+                    :is-sub="false"
+                  ></quiz-leaf-question>
                 </div>
               </div>
             </section>
@@ -1698,12 +1695,15 @@
 
           <aside id="quiz-nav" class="bg-white border border-slate-300 rounded-[10px] p-3.5 lg:sticky lg:top-[88px] lg:max-h-[calc(100vh-108px)] lg:overflow-y-auto" aria-label="Bảng câu hỏi">
             <h2 class="m-0 mb-3 text-[0.9375rem] font-bold text-slate-900">Bảng câu hỏi</h2>
-            <div v-for="(sec, sIdx) in activeExam.sections" :key="sIdx" :class="sIdx > 0 ? 'mt-3.5 pt-3 border-t border-slate-300' : ''">
+            <div v-for="(sec, sIdx) in activeExam.sections" :key="`${quizRenderEpoch}_ns_${sIdx}`" :class="sIdx > 0 ? 'mt-3.5 pt-3 border-t border-slate-300' : ''">
               <div class="text-[0.8125rem] font-bold text-slate-700 mb-2">{{ sec.title }}</div>
               <div class="grid grid-cols-5 gap-2">
-                <button v-for="item in (quizSectionNavItems[sIdx] || [])" :key="item.key" v-memo="[userAnswers[item.key], Boolean(turboChecked[item.key]), gradeResult, quizTurboMode, item.num]" type="button" class="nav-cell" :class="quizNavCellClass(item.q, item.sIdx, item.qIdx, item.subIdx)" :aria-label="`Đi tới Phần ${sIdx + 1}, câu ${item.num}`" @click="scrollToQuestion(item.sIdx, item.qIdx, item.subIdx)">
-                  {{ item.num }}
-                </button>
+                <quiz-nav-cell
+                  v-for="item in (quizSectionNavItems[sIdx] || [])"
+                  :key="`${quizRenderEpoch}_${item.key}`"
+                  :item="item"
+                  :section-index="sIdx"
+                ></quiz-nav-cell>
               </div>
             </div>
             <div class="flex flex-wrap gap-2.5 mt-3.5 pt-2.5 border-t border-slate-300 text-xs text-slate-700">
@@ -2225,7 +2225,7 @@
                     <th class="py-3 px-3 w-[110px]">Loại bài</th>
                     <th class="py-3 px-3 w-[90px]">T/Gian</th>
                     <th class="py-3 px-3 w-[120px]">Nộp lúc</th>
-                    <th class="py-3 pl-3 text-right w-[132px]">Hành động</th>
+                    <th class="py-3 pl-3 text-right history-actions-col whitespace-nowrap">Hành động</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-200">
@@ -2264,6 +2264,20 @@
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="text-indigo-600">
                             <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path>
                             <circle cx="12" cy="12" r="3"></circle>
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          data-action="export-history"
+                          class="btn btn-secondary btn-sm btn-icon"
+                          @click="exportHistoryAttempt(att)"
+                          title="Xuất bài làm (.md)"
+                          aria-label="Xuất bài làm (.md)"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="text-emerald-700">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
                           </svg>
                         </button>
                         <button

@@ -9,13 +9,14 @@ import sys
 import webbrowser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from exam_store import (
     BASE_DIR,
     DEFAULT_PORT,
     delete_exam_by_id,
     read_store,
+    read_store_version,
     replace_all_exams,
     save_folders,
     toggle_pin_by_id,
@@ -82,6 +83,12 @@ class OnTapHandler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/exams":
+            since_raw = parse_qs(parsed.query).get("since", [None])[0]
+            if since_raw is not None and since_raw.isdigit():
+                cur_version = read_store_version()
+                if int(since_raw) == cur_version:
+                    self._send_json(200, {"version": cur_version, "unchanged": True})
+                    return
             store = read_store()
             self._send_json(200, store)
             return

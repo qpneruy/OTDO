@@ -42,6 +42,18 @@ import {
   buildWeeklyBreakdown,
   filterHistory
 } from './analytics.js';
+import {
+  buildAttemptExportMarkdown,
+  buildExportFilename,
+  downloadAttemptExport
+} from './export-utils.js';
+import {
+  tagCanonicalIndices,
+  shuffleExamState,
+  remapAnswersToCanonical,
+  getShuffleOrder,
+  applyShuffleOrder
+} from './shuffle-utils.js';
 
 export function runTests() {
 const validYaml = `
@@ -998,7 +1010,432 @@ for (const tc of invalidGroupCases) {
   assert.ok(res.errors.some((e) => tc.expect.test(e)), `Group invalid case "${tc.name}" error mismatch: ${res.errors.join('; ')}`);
 }
 
-console.log('All parser, rich-text, timer, analytics, and grader assertions passed.');
+// 16. Attempt Markdown export (export-utils.js)
+const tsExport = new Date(2026, 10, 27, 9, 5, 12).getTime();
+assert.strictEqual(
+  buildExportFilename('Đề kiểm tra Đường đi ngắn nhất — Toán 12', tsExport),
+  'de-kiem-tra-duong-di-ngan-nhat-toan-12-bai-lam-20261127-0905.md'
+);
+assert.strictEqual(
+  buildExportFilename('   !!!   ', tsExport),
+  'de-on-tap-bai-lam-20261127-0905.md'
+);
+assert.strictEqual(
+  buildExportFilename(null, tsExport),
+  'de-on-tap-bai-lam-20261127-0905.md'
+);
+const longFilename = buildExportFilename('Đề ôn tập '.repeat(20), tsExport);
+assert.ok(longFilename.endsWith('-bai-lam-20261127-0905.md'));
+assert.ok(longFilename.length <= 80 + '-bai-lam-20261127-0905.md'.length);
+assert.ok(/^[a-z0-9-]+-bai-lam-\d{8}-\d{4}\.md$/.test(buildExportFilename('Đề mẫu')));
+
+const grpAnswersForExport = {
+  '0_0_0': 'C',
+  '0_0_1': 'A',
+  '0_0_2': { 0: true, 1: true },
+  '0_0_3': ' 100 ',
+  '0_1_0': 'A',
+  '1_0': 'D'
+};
+const grpMdWithGrade = buildAttemptExportMarkdown({
+  exam: groupParsed.data,
+  userAnswers: grpAnswersForExport,
+  gradeResult: grpGrade,
+  elapsedSeconds: 3665,
+  limitMinutes: 45,
+  submittedAt: tsExport,
+  autoSubmitted: true
+});
+const grpMdAutoGrade = buildAttemptExportMarkdown({
+  exam: groupParsed.data,
+  userAnswers: grpAnswersForExport,
+  gradeResult: null,
+  elapsedSeconds: 3665,
+  limitMinutes: 45,
+  submittedAt: tsExport,
+  autoSubmitted: true
+});
+assert.strictEqual(grpMdWithGrade, grpMdAutoGrade, 'Omitting gradeResult must match passing gradeExam output');
+
+// Header metadata assertions
+assert.ok(grpMdWithGrade.startsWith('# Đề đọc hiểu & điền khuyết\n'));
+assert.ok(grpMdWithGrade.includes('**Môn / Thư mục:** Tiếng Anh'));
+assert.ok(grpMdWithGrade.includes('**Thời điểm nộp:** 27/11/2026 09:05:12'));
+assert.ok(grpMdWithGrade.includes('**Thời gian làm bài:** 01:01:05 (giới hạn 45 phút)'));
+assert.ok(grpMdWithGrade.includes('**Điểm số:** **4.8 / 10** (4.8 / 10 điểm)'));
+assert.ok(grpMdWithGrade.includes('**Số câu đúng trọn vẹn:** 4 / 6'));
+assert.ok(grpMdWithGrade.includes('Tự động nộp bài khi hết giờ'));
+
+// Section & continuous numbering assertions (including group range and reset per section)
+assert.ok(grpMdWithGrade.includes('## Phần I. Cloze & Reading'));
+assert.ok(grpMdWithGrade.includes('### Câu 1–4: Passage 1 (2đ)'));
+assert.ok(grpMdWithGrade.includes('Read the passage and fill in blanks **(1)** and **(2)**.\nWater boils at $100^\\circ\\text{C}$.'));
+assert.ok(grpMdWithGrade.includes('#### Câu 1 (0.4đ)'));
+assert.ok(grpMdWithGrade.includes('- [x] **C.** childhood — *(Bạn chọn · Đáp án đúng)*'));
+assert.ok(grpMdWithGrade.includes('**Bạn chọn:** C'));
+assert.ok(grpMdWithGrade.includes('**Đáp án đúng:** C'));
+assert.ok(grpMdWithGrade.includes('**Kết quả:** Đúng (+0.4/0.4đ)'));
+assert.ok(grpMdWithGrade.includes('**Giải thích:** Blank (1) needs a noun.'));
+assert.ok(grpMdWithGrade.includes('#### Câu 2 (0.8đ)\n\nWhich word best fits blank (2)?'));
+assert.ok(grpMdWithGrade.includes('#### Câu 3 (0.4đ)'));
+assert.ok(grpMdWithGrade.includes('- **a)** Water boils at 100 C\n  - Bạn chọn: **Đúng** | Đáp án: **Đúng** | ✓ Đúng'));
+assert.ok(grpMdWithGrade.includes('- **b)** Water freezes at 50 C\n  - Bạn chọn: **Đúng** | Đáp án: **Sai** | ✗ Sai'));
+assert.ok(grpMdWithGrade.includes('**Kết quả:** Đúng một phần — 1/2 ý (+0.2/0.4đ)'));
+assert.ok(grpMdWithGrade.includes('#### Câu 4 (0.4đ)\n\nWhat temperature?'));
+assert.ok(grpMdWithGrade.includes('**Bạn trả lời:** 100'));
+assert.ok(grpMdWithGrade.includes('**Đáp án chấp nhận:** 100 | 100 C'));
+assert.ok(grpMdWithGrade.includes('### Câu 5 (5đ)\n\nShort passage 2.'));
+assert.ok(grpMdWithGrade.includes('#### Câu 5 (5đ)'));
+assert.ok(grpMdWithGrade.includes('- [x] **A.** one — *(Bạn chọn)*'));
+assert.ok(grpMdWithGrade.includes('- [ ] **B.** two — *(Đáp án đúng)*'));
+assert.ok(grpMdWithGrade.includes('**Kết quả:** Sai (0/5đ)'));
+assert.ok(grpMdWithGrade.includes('## Phần II. Standalone\n\n### Câu 1 (3đ)'));
+
+// Unanswered questions, multiline explanation/question, and omitted optional metadata
+const multiExam = {
+  meta: { title: 'Đề nhiều dòng' },
+  sections: [
+    {
+      title: 'Phần I',
+      questions: [
+        {
+          type: 'multiple_choice',
+          question: 'Dòng 1: $x^2 + 1 = 0$\nDòng 2: Chọn đáp án đúng',
+          options: { A: '$a$', B: '$b$', C: '$c$', D: '$d$' },
+          answer: 'B',
+          explanation: 'Bước 1: Xét phương trình\n$$\\Delta = b^2 - 4ac$$'
+        },
+        {
+          type: 'true_false',
+          question: 'Xét các mệnh đề:',
+          statements: [
+            { text: 'Ý 1 với $|x| \\ge 0$', is_true: true },
+            { text: 'Ý 2', is_true: false }
+          ],
+          explanation: ''
+        },
+        {
+          type: 'short_answer',
+          question: 'Nhập kết quả',
+          accepted_answers: ['42'],
+          explanation: ''
+        }
+      ]
+    }
+  ]
+};
+const unansweredMd = buildAttemptExportMarkdown({
+  exam: multiExam,
+  userAnswers: { '0_1': { 0: true }, '0_2': '   ' },
+  elapsedSeconds: 95,
+  autoSubmitted: false
+});
+assert.strictEqual(unansweredMd.includes('Môn / Thư mục'), false);
+assert.strictEqual(unansweredMd.includes('Thời điểm nộp'), false);
+assert.strictEqual(unansweredMd.includes('Tự động nộp bài'), false);
+assert.ok(unansweredMd.includes('**Thời gian làm bài:** 01:35'));
+assert.ok(unansweredMd.includes('**Bạn chọn:** Chưa trả lời'));
+assert.ok(unansweredMd.includes('- [ ] **B.** $b$ — *(Đáp án đúng)*'));
+assert.ok(unansweredMd.includes('Dòng 1: $x^2 + 1 = 0$\nDòng 2: Chọn đáp án đúng'));
+assert.ok(unansweredMd.includes('**Giải thích:**\n\nBước 1: Xét phương trình\n$$\\Delta = b^2 - 4ac$$'));
+assert.ok(unansweredMd.includes('- **b)** Ý 2\n  - Bạn chọn: **Chưa chọn** | Đáp án: **Sai** | ✗ Sai'));
+assert.ok(unansweredMd.includes('**Bạn trả lời:** Chưa trả lời'));
+
+// downloadAttemptExport test (returns { filename, content } and triggers Blob + <a download> cleanly)
+const dlRes = downloadAttemptExport({
+  exam: multiExam,
+  userAnswers: { '0_0': 'B' },
+  elapsedSeconds: 30,
+  submittedAt: tsExport
+});
+assert.strictEqual(dlRes.filename, 'de-nhieu-dong-bai-lam-20261127-0905.md');
+assert.ok(dlRes.content.includes('# Đề nhiều dòng'));
+assert.ok(dlRes.content.includes('**Thời điểm nộp:** 27/11/2026 09:05:12'));
+assert.ok(dlRes.content.includes('**Bạn chọn:** B'));
+
+// 17. Question shuffling & answer-key remapping (shuffle-utils.js)
+const shuffleExamYaml = `
+meta:
+  title: "Đề kiểm tra xáo trộn"
+  folder: "Tổng hợp"
+sections:
+  - title: "Phần I. Hỗn hợp"
+    points: 6
+    questions:
+      - type: multiple_choice
+        question: "MC 0"
+        options:
+          A: "a0"
+          B: "b0"
+          C: "c0"
+          D: "d0"
+        answer: "A"
+        points: 1
+      - type: true_false
+        question: "TF 1"
+        points: 2
+        statements:
+          - text: "s0"
+            is_true: true
+          - text: "s1"
+            is_true: false
+          - text: "s2"
+            is_true: true
+          - text: "s3"
+            is_true: false
+      - type: group
+        title: "Cloze Group 2"
+        content: "Fill (1) and (2) and (3)."
+        points: 2
+        questions:
+          - options:
+              A: "g1a"
+              B: "g1b"
+              C: "g1c"
+              D: "g1d"
+            answer: "B"
+          - type: true_false
+            statements:
+              - text: "gs0"
+                is_true: true
+              - text: "gs1"
+                is_true: false
+          - type: short_answer
+            question: "Sub SA"
+            accepted_answers: ["42"]
+      - type: short_answer
+        question: "SA 3"
+        accepted_answers: ["99"]
+        points: 1
+  - title: "Phần II. Một câu"
+    points: 4
+    questions:
+      - type: multiple_choice
+        question: "Solo 0"
+        options:
+          A: "x"
+          B: "y"
+          C: "z"
+          D: "w"
+        answer: "D"
+`;
+const shuffleParsed = parseExamYaml(shuffleExamYaml);
+assert.strictEqual(shuffleParsed.ok, true, `Shuffle test YAML must parse: ${shuffleParsed.errors}`);
+const canonExam = shuffleParsed.data;
+
+// 17a. tagCanonicalIndices: tags top-level questions without mutating input or shuffling group sub-questions
+const taggedExam = tagCanonicalIndices(canonExam);
+assert.notStrictEqual(taggedExam, canonExam);
+assert.strictEqual(Object.prototype.hasOwnProperty.call(canonExam.sections[0].questions[0], '_origQIdx'), false);
+assert.deepStrictEqual(taggedExam.sections[0].questions.map((q) => q._origQIdx), [0, 1, 2, 3]);
+assert.deepStrictEqual(taggedExam.sections[1].questions.map((q) => q._origQIdx), [0]);
+assert.strictEqual(taggedExam.sections[0].questions[2].type, 'group');
+assert.strictEqual(taggedExam.sections[0].questions[2].questions.length, 3);
+assert.strictEqual(taggedExam.sections[0].questions[2].questions[0].answer, 'B');
+assert.strictEqual(taggedExam.sections[0].questions[2].questions[1].type, 'true_false');
+assert.strictEqual(taggedExam.sections[0].questions[2].questions[2].type, 'short_answer');
+assert.strictEqual(getShuffleOrder(canonExam), null);
+assert.strictEqual(getShuffleOrder(taggedExam), null);
+
+// 17b. Single-question-per-section exam cannot shuffle -> shuffled: false
+const soloOnlyExam = {
+  meta: { title: 'Đề 1 câu' },
+  sections: [
+    {
+      title: 'S1',
+      questions: [
+        { type: 'multiple_choice', question: 'Only', options: { A: '1', B: '2', C: '3', D: '4' }, answer: 'A', explanation: '' }
+      ]
+    }
+  ]
+};
+const soloRes = shuffleExamState({
+  exam: soloOnlyExam,
+  userAnswers: { '0_0': 'A' },
+  turboChecked: { '0_0': true }
+});
+assert.strictEqual(soloRes.shuffled, false);
+assert.deepStrictEqual(soloRes.userAnswers, { '0_0': 'A' });
+assert.deepStrictEqual(soloRes.turboChecked, { '0_0': true });
+assert.strictEqual(soloRes.exam.sections[0].questions[0]._origQIdx, 0);
+assert.strictEqual(getShuffleOrder(soloRes.exam), null);
+
+// 17c. Degenerate RNG (constant 0.999999 -> identity Fisher-Yates) still guarantees distinct order
+const origAnswers = {
+  '0_0': 'A',
+  '0_1': { 0: true, 1: false, 2: true, 3: true },
+  '0_2_0': 'B',
+  '0_2_1': { 0: true, 1: true },
+  '0_2_2': '42',
+  '0_3': '99',
+  '1_0': 'D'
+};
+const origTurboChecked = {
+  '0_0': true,
+  '0_1__st_0': true,
+  '0_1__st_2': true,
+  '0_2_0': true,
+  '0_2_1__st_0': true,
+  '0_2_1__st_1': true,
+  '0_2_1': true,
+  '0_2_2': true,
+  '0_3': true,
+  '1_0': true
+};
+const baselineGrade = gradeExam(canonExam, origAnswers);
+
+const degShuffle = shuffleExamState({
+  exam: canonExam,
+  userAnswers: origAnswers,
+  turboChecked: origTurboChecked,
+  rng: () => 0.999999
+});
+assert.strictEqual(degShuffle.shuffled, true);
+assert.deepStrictEqual(degShuffle.exam.sections[0].questions.map((q) => q._origQIdx), [1, 0, 2, 3]);
+assert.deepStrictEqual(degShuffle.exam.sections[1].questions.map((q) => q._origQIdx), [0]);
+assert.deepStrictEqual(getShuffleOrder(degShuffle.exam), [[1, 0, 2, 3], [0]]);
+
+// Verify all 4 key formats remapped accurately (0_0 <-> 0_1 swapped, group 0_2 unchanged here)
+assert.strictEqual(degShuffle.userAnswers['0_1'], 'A');
+assert.deepStrictEqual(degShuffle.userAnswers['0_0'], { 0: true, 1: false, 2: true, 3: true });
+assert.notStrictEqual(degShuffle.userAnswers['0_0'], origAnswers['0_1'], 'TF answer object must be deep-cloned');
+assert.strictEqual(degShuffle.turboChecked['0_1'], true);
+assert.strictEqual(degShuffle.turboChecked['0_0__st_0'], true);
+assert.strictEqual(degShuffle.turboChecked['0_0__st_2'], true);
+assert.strictEqual(degShuffle.turboChecked['0_1__st_0'], undefined);
+assert.strictEqual(degShuffle.userAnswers['0_2_0'], 'B');
+assert.deepStrictEqual(degShuffle.userAnswers['0_2_1'], { 0: true, 1: true });
+assert.strictEqual(degShuffle.turboChecked['0_2_1__st_0'], true);
+assert.strictEqual(degShuffle.turboChecked['0_2_1__st_1'], true);
+assert.strictEqual(degShuffle.turboChecked['0_2_1'], true);
+assert.strictEqual(degShuffle.userAnswers['1_0'], 'D');
+
+// 17d. Shuffle with rng = () => 0 moves group question and remaps all group & statement keys
+const zeroShuffle = shuffleExamState({
+  exam: canonExam,
+  userAnswers: origAnswers,
+  turboChecked: origTurboChecked,
+  rng: () => 0
+});
+assert.strictEqual(zeroShuffle.shuffled, true);
+// Fisher-Yates on [0,1,2,3] with rng=0: i=3 swap(3,0)->[3,1,2,0]; i=2 swap(2,0)->[2,1,3,0]; i=1 swap(1,0)->[1,2,3,0]
+assert.deepStrictEqual(zeroShuffle.exam.sections[0].questions.map((q) => q._origQIdx), [1, 2, 3, 0]);
+// Group (orig 2) is now at newQIdx 1; its sub-questions stay in exact original order
+const movedGroup = zeroShuffle.exam.sections[0].questions[1];
+assert.strictEqual(movedGroup.type, 'group');
+assert.strictEqual(movedGroup.title, 'Cloze Group 2');
+assert.strictEqual(movedGroup.questions[0].answer, 'B');
+assert.strictEqual(movedGroup.questions[1].type, 'true_false');
+assert.strictEqual(movedGroup.questions[2].accepted_answers[0], '42');
+// Check remapped keys for moved group (old 0_2_* -> new 0_1_*) and moved MC/TF/SA
+assert.deepStrictEqual(zeroShuffle.userAnswers['0_0'], origAnswers['0_1']);
+assert.strictEqual(zeroShuffle.userAnswers['0_1_0'], 'B');
+assert.deepStrictEqual(zeroShuffle.userAnswers['0_1_1'], { 0: true, 1: true });
+assert.strictEqual(zeroShuffle.userAnswers['0_1_2'], '42');
+assert.strictEqual(zeroShuffle.userAnswers['0_2'], '99');
+assert.strictEqual(zeroShuffle.userAnswers['0_3'], 'A');
+assert.strictEqual(zeroShuffle.turboChecked['0_0__st_0'], true);
+assert.strictEqual(zeroShuffle.turboChecked['0_0__st_2'], true);
+assert.strictEqual(zeroShuffle.turboChecked['0_1_0'], true);
+assert.strictEqual(zeroShuffle.turboChecked['0_1_1__st_0'], true);
+assert.strictEqual(zeroShuffle.turboChecked['0_1_1__st_1'], true);
+assert.strictEqual(zeroShuffle.turboChecked['0_1_1'], true);
+assert.strictEqual(zeroShuffle.turboChecked['0_1_2'], true);
+assert.strictEqual(zeroShuffle.turboChecked['0_2'], true);
+assert.strictEqual(zeroShuffle.turboChecked['0_3'], true);
+assert.strictEqual(zeroShuffle.turboChecked['1_0'], true);
+
+// Grading shuffled exam with remapped answers yields identical score totals
+const shuffledGrade = gradeExam(zeroShuffle.exam, zeroShuffle.userAnswers);
+assert.strictEqual(shuffledGrade.earnedPoints, baselineGrade.earnedPoints);
+assert.strictEqual(shuffledGrade.totalMaxPoints, baselineGrade.totalMaxPoints);
+assert.strictEqual(shuffledGrade.scale10, baselineGrade.scale10);
+assert.strictEqual(shuffledGrade.fullCorrectCount, baselineGrade.fullCorrectCount);
+assert.strictEqual(shuffledGrade.unansweredCount, baselineGrade.unansweredCount);
+
+// 17e. Multiple consecutive shuffles preserve original canonical _origQIdx & remap cleanly
+let curState = zeroShuffle;
+for (let step = 0; step < 4; step++) {
+  const prevOrder = curState.exam.sections[0].questions.map((q) => q._origQIdx);
+  curState = shuffleExamState({
+    exam: curState.exam,
+    userAnswers: curState.userAnswers,
+    turboChecked: curState.turboChecked,
+    rng: () => ((step * 0.37) % 1)
+  });
+  const nextOrder = curState.exam.sections[0].questions.map((q) => q._origQIdx);
+  assert.strictEqual(curState.shuffled, true);
+  assert.notDeepStrictEqual(nextOrder, prevOrder, 'Each shuffle must differ from previous order');
+  const stepGrade = gradeExam(curState.exam, curState.userAnswers);
+  assert.strictEqual(stepGrade.scale10, baselineGrade.scale10);
+  assert.strictEqual(stepGrade.earnedPoints, baselineGrade.earnedPoints);
+}
+
+// remapAnswersToCanonical recovers exact original keys & deep-clones TF objects
+const recoveredCanonicalAnswers = remapAnswersToCanonical(curState.exam, curState.userAnswers);
+assert.deepStrictEqual(recoveredCanonicalAnswers, origAnswers);
+recoveredCanonicalAnswers['0_1'][0] = false;
+assert.strictEqual(origAnswers['0_1'][0], true, 'Mutating remapped TF object must not mutate original');
+const canonExportMd = buildAttemptExportMarkdown({
+  exam: canonExam,
+  userAnswers: remapAnswersToCanonical(curState.exam, curState.userAnswers),
+  submittedAt: tsExport
+});
+assert.ok(canonExportMd.includes('# Đề kiểm tra xáo trộn'));
+assert.ok(canonExportMd.includes('**Bạn chọn:** A'));
+
+// 17f. Multi-digit question index remapping (12 questions in one section)
+const twelveQs = Array.from({ length: 12 }, (_, i) => ({
+  type: 'multiple_choice',
+  question: `Q${i}`,
+  options: { A: '1', B: '2', C: '3', D: '4' },
+  answer: 'A',
+  explanation: ''
+}));
+const bigExam = { meta: { title: '12Q' }, sections: [{ title: 'S', questions: twelveQs }] };
+const bigAns = { '0_10': 'B', '0_11': 'C' };
+const bigTurbo = { '0_10': true, '0_11__st_1': true };
+const bigShuffled = shuffleExamState({ exam: bigExam, userAnswers: bigAns, turboChecked: bigTurbo, rng: () => 0 });
+assert.strictEqual(bigShuffled.shuffled, true);
+assert.deepStrictEqual(remapAnswersToCanonical(bigShuffled.exam, bigShuffled.userAnswers), bigAns);
+assert.deepStrictEqual(remapAnswersToCanonical(bigShuffled.exam, bigShuffled.turboChecked), bigTurbo);
+
+// 17g. applyShuffleOrder round-trip & invalid/mismatched fallbacks
+const savedOrder = getShuffleOrder(zeroShuffle.exam);
+assert.deepStrictEqual(savedOrder, [[1, 2, 3, 0], [0]]);
+const restoredExam = applyShuffleOrder(canonExam, savedOrder);
+assert.deepStrictEqual(getShuffleOrder(restoredExam), savedOrder);
+assert.strictEqual(restoredExam.sections[0].questions[0].question, 'TF 1');
+assert.strictEqual(restoredExam.sections[0].questions[1].title, 'Cloze Group 2');
+assert.strictEqual(restoredExam.sections[0].questions[2].question, 'SA 3');
+assert.strictEqual(restoredExam.sections[0].questions[3].question, 'MC 0');
+assert.strictEqual(restoredExam.sections[0].questions[3]._origQIdx, 0);
+
+// Invalid orders fall back safely to canonical order tagged with _origQIdx
+for (const badOrder of [
+  null,
+  undefined,
+  'invalid',
+  [[1, 0, 2, 3]],                      // wrong section count
+  [[1, 0, 2], [0]],                    // wrong question length
+  [[0, 0, 1, 2], [0]],                 // duplicate index
+  [[0, 1, 2, 9], [0]],                 // out-of-range index
+  [[-1, 0, 1, 2], [0]],                // negative index
+  [[0.5, 1, 2, 3], [0]],               // non-integer
+  [['1', '0', '2', '3'], [0]]          // string indices
+]) {
+  const fb = applyShuffleOrder(canonExam, badOrder);
+  assert.deepStrictEqual(fb.sections[0].questions.map((q) => q._origQIdx), [0, 1, 2, 3]);
+  assert.deepStrictEqual(fb.sections[1].questions.map((q) => q._origQIdx), [0]);
+  assert.strictEqual(getShuffleOrder(fb), null);
+}
+
+// Partial invalid: valid section 0 + invalid section 1 -> section 0 reordered, section 1 canonical
+const partialRes = applyShuffleOrder(canonExam, [[3, 2, 1, 0], [5]]);
+assert.deepStrictEqual(partialRes.sections[0].questions.map((q) => q._origQIdx), [3, 2, 1, 0]);
+assert.deepStrictEqual(partialRes.sections[1].questions.map((q) => q._origQIdx), [0]);
+
+console.log('All parser, rich-text, timer, analytics, export, shuffle, and grader assertions passed.');
 }
 
 runTests();

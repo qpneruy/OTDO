@@ -381,11 +381,58 @@ select.field-control {
 }
 
 /* Cards & layout/style containment (avoids content-visibility height jumps while isolating recalcs) */
+#quiz-header,
+#quiz-nav,
 .exam-card,
 .folder-card,
 .question-card,
 .question-group-card {
   contain: layout style;
+}
+
+#quiz-timer {
+  contain: layout style paint;
+}
+
+/* Block/flex layout for quiz view so Firefox Gecko uses fast incremental block reflow instead of nested CSS Grid track resizing */
+.quiz-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  align-items: stretch;
+}
+
+@media (min-width: 1024px) {
+  .quiz-layout {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .quiz-layout > #quiz-body {
+    flex: 1 1 0%;
+    min-width: 0;
+  }
+
+  .quiz-layout > #quiz-nav {
+    width: 300px;
+    flex-shrink: 0;
+  }
+}
+
+.quiz-questions-stack > * + * {
+  margin-top: 14px;
+}
+
+.quiz-subquestions-stack > * + * {
+  margin-top: 12px;
+}
+
+.quiz-options-stack > * + * {
+  margin-top: 8px;
+}
+
+.quiz-statements-stack > * + * {
+  margin-top: 10px;
 }
 
 .question-card {
@@ -467,16 +514,31 @@ select.field-control {
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background-color var(--transition), border-color var(--transition);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
 }
 
-.option-row:not(.is-locked):not(.opt-correct):not(.opt-wrong):hover {
+.option-row:not(.is-locked):not(.opt-correct):not(.opt-wrong):not(.opt-selected):hover {
   background-color: var(--color-muted);
   border-color: var(--color-secondary);
 }
 
+.option-row:not(.is-locked):not(.opt-correct):not(.opt-wrong):active {
+  background-color: #CCFBF1;
+  border-color: var(--color-primary);
+}
+
+.option-row.opt-selected {
+  background-color: #F0FDFA;
+  border-color: var(--color-primary);
+  font-weight: 600;
+}
+
 .option-row.is-locked {
   cursor: default;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .statement-row {
@@ -502,7 +564,9 @@ button.tf-btn {
   background-color: var(--color-card);
   color: var(--color-muted-foreground);
   cursor: pointer;
-  transition: background-color var(--transition), border-color var(--transition), color var(--transition);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
 }
 
 button.tf-btn:enabled:not([aria-pressed="true"]):hover {
@@ -528,7 +592,9 @@ button.nav-cell {
   background-color: var(--color-card);
   color: var(--color-foreground);
   cursor: pointer;
-  transition: background-color var(--transition), border-color var(--transition), color var(--transition);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
 }
 
 button.nav-cell:not(.is-correct):not(.is-partial):not(.is-wrong):hover {
@@ -702,7 +768,16 @@ button.nav-cell.is-wrong {
   backdrop-filter: blur(4px);
 }
 
+.quiz-pause-overlay.z-30 {
+  z-index: 30;
+}
+
+.quiz-pause-overlay.z-40 {
+  z-index: 40;
+}
+
 .quiz-pause-card {
+  position: relative;
   width: 100%;
   max-width: 360px;
   max-height: calc(100vh - 32px);
@@ -714,6 +789,20 @@ button.nav-cell.is-wrong {
   background-color: var(--color-card);
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.14);
   text-align: center;
+}
+
+.modal-close-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 34px;
+  height: 34px;
+  color: #64748B;
+}
+
+.modal-close-btn:hover {
+  background-color: #F1F5F9;
+  color: var(--color-foreground);
 }
 
 /* Profile & Learning Analytics */
@@ -1205,6 +1294,38 @@ button.turbo-switch.is-on .turbo-switch-thumb {
   transform: translateX(16px);
 }
 
+/* Turbo mode in-quiz quick actions (Shuffle & Reset) */
+.turbo-quiz-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn.btn-sm.turbo-action-btn {
+  min-height: 28px;
+  min-width: auto;
+  padding: 3px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  gap: 5px;
+  border-color: var(--color-border);
+  background-color: #F8FAFC;
+  color: var(--color-muted-foreground);
+}
+
+.btn.btn-sm.turbo-action-btn:enabled:hover {
+  background-color: #F0FDFA;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.btn.btn-sm.turbo-action-btn.turbo-reset-btn:enabled:hover {
+  background-color: #FFF7ED;
+  border-color: #FDBA74;
+  color: #C2410C;
+}
+
 /* Desktop Folder Explorer, Context Menu & Management Modals */
 .home-main-tabs {
   display: flex;
@@ -1451,6 +1572,10 @@ button.move-tree-item.is-selected {
 button.move-tree-item:focus-visible {
   outline: 2px solid var(--color-ring);
   outline-offset: 1px;
+}
+
+#history-table th.history-actions-col {
+  width: 172px;
 }
 
 @media (prefers-reduced-motion: reduce) {

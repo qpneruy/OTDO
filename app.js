@@ -1,4 +1,4 @@
-import { createApp, ref, computed, watch, nextTick } from 'vue';
+import { createApp, defineComponent, h, provide, inject, ref, shallowRef, computed, watch, nextTick } from 'vue';
 import jsyaml from 'js-yaml';
 import {
   STORAGE_KEY,
@@ -16,6 +16,7 @@ import {
   parseYaml,
   parseExamYaml,
   serializeExamYaml,
+  gradeSingleQuestion,
   gradeExam,
   resolveExamPoints,
   countExamStats,
@@ -49,6 +50,14 @@ import {
   compareFolderPathsVi,
   updateExamFolderYaml as updateExamFolderYamlBase
 } from './folder-utils.js';
+import { downloadAttemptExport } from './export-utils.js';
+import {
+  tagCanonicalIndices,
+  shuffleExamState,
+  remapAnswersToCanonical,
+  getShuffleOrder,
+  applyShuffleOrder
+} from './shuffle-utils.js';
 
 let uidCounter = 0;
 function nextUid() {
@@ -146,7 +155,242 @@ function toSafeFilenameSlug(title) {
   return ascii || 'de-on-tap';
 }
 
+const QUIZ_CTX_KEY = Symbol('otdo-quiz-ctx');
+const MC_OPTION_KEYS = ['A', 'B', 'C', 'D'];
+
+const QuizProgressText = defineComponent({
+  name: 'QuizProgressText',
+  setup() {
+    const ctx = inject(QUIZ_CTX_KEY);
+    return () => h('div', { id: 'quiz-progress', class: 'text-sm text-slate-700 font-medium' }, ctx.quizProgressText.value);
+  }
+});
+
+const QuizNavCell = defineComponent({
+  name: 'QuizNavCell',
+  props: {
+    item: { type: Object, required: true },
+    sectionIndex: { type: Number, required: true }
+  },
+  setup(props) {
+    const ctx = inject(QUIZ_CTX_KEY);
+    return () => {
+      const item = props.item;
+      const cls = ctx.quizNavCellClass(item.q, item.sIdx, item.qIdx, item.subIdx);
+      return h('button', {
+        type: 'button',
+        class: cls ? `nav-cell ${cls}` : 'nav-cell',
+        'aria-label': `Đi tới Phần ${props.sectionIndex + 1}, câu ${item.num}`,
+        onClick: () => ctx.scrollToQuestion(item.sIdx, item.qIdx, item.subIdx)
+      }, String(item.num));
+    };
+  }
+});
+
+const QuizLeafQuestion = defineComponent({
+  name: 'QuizLeafQuestion',
+  props: {
+    question: { type: Object, required: true },
+    sIdx: { type: Number, required: true },
+    qIdx: { type: Number, required: true },
+    subIdx: { type: Number, default: null },
+    isSub: { type: Boolean, default: false }
+  },
+  setup(props) {
+    const ctx = inject(QUIZ_CTX_KEY);
+    return () => {
+      const q = props.question;
+      const sIdx = props.sIdx;
+      const qIdx = props.qIdx;
+      const subIdx = props.subIdx;
+      const isSub = props.isSub;
+      const id = subIdx === null || subIdx === undefined ? `${sIdx}_${qIdx}` : `${sIdx}_${qIdx}_${subIdx}`;
+      const num = ctx.getQuizQuestionNum(sIdx, qIdx, subIdx);
+      const maxPts = ctx.formatPointNum(ctx.getQuizQuestionMaxPoints(sIdx, qIdx, subIdx));
+      const revealed = ctx.isQuestionRevealed(sIdx, qIdx, subIdx);
+      const locked = revealed;
+      const detail = revealed ? ctx.getDisplayDetail(sIdx, qIdx, subIdx) : null;
+      const picked = ctx.userAnswers.value[id];
+      const turboMode = ctx.quizTurboMode.value;
+
+      let cardState = '';
+      if (detail) {
+        cardState = detail.isFullCorrect ? 'is-correct' : (detail.score > 0 ? 'is-partial' : 'is-wrong');
+      }
+
+      const headerChildren = [
+        h('div', { class: 'flex items-center gap-2' }, [
+          h('span', { class: 'question-number' }, `Câu ${num}`),
+          h('span', { class: 'badge bg-slate-100 text-slate-700 border-slate-200 tabular-nums' }, `${maxPts} đ`)
+        ])
+      ];
+      if (revealed) {
+        const badgeCls = detail
+          ? (detail.isFullCorrect ? 'badge-success' : (detail.score > 0 ? '' : 'badge-error'))
+          : '';
+        headerChildren.push(
+          h('span', { class: badgeCls ? `badge bg-slate-200 text-slate-900 ${badgeCls}` : 'badge bg-slate-200 text-slate-900' }, ctx.quizBadgeText(sIdx, qIdx, subIdx))
+        );
+      }
+
+      const children = [
+        h('div', { class: isSub ? 'flex justify-between items-center gap-2.5 mb-2.5' : 'flex justify-between items-center gap-2.5 mb-2' }, headerChildren)
+      ];
+
+      if (!isSub || ctx.hasSubQuestionText(q)) {
+        children.push(
+          h('div', {
+            class: isSub
+              ? 'question-text m-0 mb-3 text-base font-medium text-slate-900 whitespace-normal'
+              : 'question-text m-0 mb-3.5 text-base font-medium text-slate-900 whitespace-normal',
+            innerHTML: ctx.renderRichText(q.question)
+          })
+        );
+      }
+
+      if (q.type === 'multiple_choice') {
+        const optionNodes = MC_OPTION_KEYS.map((key) => {
+          let optCls = '';
+          if (detail) {
+            if (key === q.answer) optCls = 'is-locked opt-correct';
+            else if (picked === key) optCls = 'is-locked opt-wrong';
+            else optCls = 'is-locked';
+          } else if (picked === key) {
+            optCls = 'opt-selected';
+          }
+          return h('label', {
+            key,
+            class: optCls ? `option-row ${optCls}` : 'option-row',
+            onPointerdown: (e) => ctx.onMcOptionPointerDown(e, sIdx, qIdx, key, subIdx),
+            onClick: (e) => ctx.onMcLabelClick(e, id, key)
+          }, [
+            h('input', {
+              type: 'radio',
+              class: 'radio-input',
+              name: `q_${id}`,
+              value: key,
+              checked: picked === key,
+              disabled: locked,
+              onChange: () => ctx.selectMcOption(sIdx, qIdx, key, subIdx)
+            }),
+            h('span', { class: isSub ? 'font-bold min-w-[20px]' : 'font-bold min-w-[22px]' }, `${key}.`),
+            h('span', { innerHTML: ctx.renderRichText(q.options[key]) })
+          ]);
+        });
+        children.push(h('div', { class: 'quiz-options-stack' }, optionNodes));
+        if (revealed && detail && !detail.isFullCorrect) {
+          children.push(
+            h('div', { class: isSub ? 'mt-2 text-sm font-semibold' : 'mt-2.5 text-sm font-semibold' }, `Đáp án đúng: ${q.answer}`)
+          );
+        }
+      } else if (q.type === 'true_false') {
+        const stNodes = (q.statements || []).map((st, stIdx) => {
+          const stRev = ctx.isTfStatementRevealed(sIdx, qIdx, stIdx, subIdx);
+          const stRes = stRev ? ctx.getStatementDisplayResult(sIdx, qIdx, stIdx, subIdx) : null;
+          const stCls = stRes ? (stRes.isCorrect ? 'st-correct' : 'st-wrong') : '';
+          const tfPick = picked && typeof picked === 'object' ? picked[stIdx] : undefined;
+          const textChildren = [
+            h('strong', null, `${String.fromCharCode(97 + stIdx)})`),
+            ' ',
+            h('span', { innerHTML: ctx.renderRichText(st.text) })
+          ];
+          if (stRev) {
+            textChildren.push(
+              h('span', { class: `badge ml-1 ${stRes?.isCorrect ? 'badge-success' : 'badge-error'}` }, `Đáp án: ${st.is_true ? 'Đúng' : 'Sai'}`)
+            );
+          }
+          return h('div', {
+            key: stIdx,
+            class: stCls ? `statement-row ${stCls}` : 'statement-row'
+          }, [
+            h('div', { class: 'flex-1 basis-[240px] text-slate-900' }, textChildren),
+            h('div', { class: 'inline-flex gap-2' }, [
+              h('button', {
+                type: 'button',
+                class: 'tf-btn',
+                'aria-pressed': tfPick === true,
+                disabled: stRev,
+                onPointerdown: (e) => ctx.onTfBtnPointerDown(e, sIdx, qIdx, stIdx, true, subIdx),
+                onClick: () => ctx.setTfPick(sIdx, qIdx, stIdx, true, subIdx)
+              }, 'Đúng'),
+              h('button', {
+                type: 'button',
+                class: 'tf-btn',
+                'aria-pressed': tfPick === false,
+                disabled: stRev,
+                onPointerdown: (e) => ctx.onTfBtnPointerDown(e, sIdx, qIdx, stIdx, false, subIdx),
+                onClick: () => ctx.setTfPick(sIdx, qIdx, stIdx, false, subIdx)
+              }, 'Sai')
+            ])
+          ]);
+        });
+        children.push(h('div', { class: 'quiz-statements-stack' }, stNodes));
+      } else if (q.type === 'short_answer') {
+        const shortCls = detail ? (detail.isFullCorrect ? 'input-correct' : 'input-wrong') : '';
+        const inputRow = [
+          h('input', {
+            type: 'text',
+            class: shortCls
+              ? `short-input field-control flex-1 min-w-[180px] max-w-[380px] text-base bg-white border-slate-400 ${shortCls}`
+              : 'short-input field-control flex-1 min-w-[180px] max-w-[380px] text-base bg-white border-slate-400',
+            value: typeof picked === 'string' ? picked : '',
+            placeholder: 'Nhập câu trả lời...',
+            'aria-label': `Đáp án câu ${num}`,
+            disabled: locked,
+            onInput: (e) => {
+              ctx.userAnswers.value[id] = e.target.value;
+            },
+            onKeydown: (e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                ctx.checkShortAnswerTurbo(sIdx, qIdx, subIdx);
+              }
+            }
+          })
+        ];
+        if (turboMode && !locked) {
+          inputRow.push(
+            h('button', {
+              type: 'button',
+              class: 'btn btn-primary btn-sm shrink-0',
+              'data-action': 'check-short',
+              onClick: () => ctx.checkShortAnswerTurbo(sIdx, qIdx, subIdx)
+            }, 'Kiểm tra')
+          );
+        }
+        children.push(h('div', { class: 'flex flex-wrap items-center gap-2' }, inputRow));
+        if (revealed) {
+          children.push(
+            h('div', { class: 'mt-2.5 text-sm font-semibold' }, `Đáp án chấp nhận: ${(q.accepted_answers || []).join(' | ')}`)
+          );
+        }
+      }
+
+      if (revealed && q.explanation) {
+        children.push(
+          h('div', { class: 'mt-2.5 px-3 py-2.5 rounded-md bg-slate-200 text-slate-700 text-sm whitespace-normal' }, [
+            h('strong', null, 'Giải thích:'),
+            ' ',
+            h('span', { innerHTML: ctx.renderRichText(q.explanation) })
+          ])
+        );
+      }
+
+      const baseClass = isSub ? 'question-card group-subquestion-card' : 'question-card';
+      return h('article', {
+        id: `qcard_${id}`,
+        class: cardState ? `${baseClass} ${cardState}` : baseClass
+      }, children);
+    };
+  }
+});
+
 createApp({
+  components: {
+    QuizProgressText,
+    QuizNavCell,
+    QuizLeafQuestion
+  },
   setup() {
     const view = ref('list');
     const exams = ref([]);
@@ -174,15 +418,16 @@ createApp({
     const editorLeftPanel = ref('edit');
     const expandedReorderGroups = ref({});
     const showEditorJumpMenu = ref(false);
+    const showEditorExitConfirm = ref(false);
     const copyLabel = ref('Copy Prompt AI');
     const previewPaneRef = ref(null);
     const toast = ref(null);
     const serverConnected = ref(false);
 
-    const activeExam = ref(null);
+    const activeExam = shallowRef(null);
     const activeExamId = ref(null);
     const userAnswers = ref({});
-    const gradeResult = ref(null);
+    const gradeResult = shallowRef(null);
     const showSubmitConfirm = ref(false);
     const pendingUnanswered = ref(0);
     const showExitQuizConfirm = ref(false);
@@ -200,6 +445,7 @@ createApp({
     const turboModePref = ref(readTurboModePref());
     const quizTurboMode = ref(false);
     const turboChecked = ref({});
+    const quizRenderEpoch = ref(0);
 
     function toggleTurboModePref() {
       const next = !turboModePref.value;
@@ -219,6 +465,7 @@ createApp({
     const quizTimerStatus = ref('stopwatch');
     const quizTimerMode = ref('stopwatch');
     const quizAutoSubmitted = ref(false);
+    const quizSubmittedAt = ref(null);
 
     let latestTimerSnap = {
       display: '00:00',
@@ -270,6 +517,12 @@ createApp({
     let sortableInstances = [];
     let sortableInitToken = 0;
     let exitConfirmAutoPaused = false;
+    let editorCleanSnapshot = null;
+    let turboDetailsCache = Object.create(null);
+    let canonicalQuizExam = null;
+    let lastMouseOptionHandledKey = '';
+    let lastMouseOptionHandledAt = 0;
+    let hasOpenContextMenu = false;
 
     function syncQuizTimerDom() {
       const el = quizTimerDisplayRef.value;
@@ -362,12 +615,22 @@ createApp({
           }
         }
       }
+      let sanitizedShuffleOrder = null;
+      if (Array.isArray(entry.shuffleOrder) && entry.shuffleOrder.length > 0) {
+        const isValidOrder = entry.shuffleOrder.every(
+          (secOrder) => Array.isArray(secOrder) && secOrder.every((n) => Number.isInteger(n) && n >= 0)
+        );
+        if (isValidOrder) {
+          sanitizedShuffleOrder = entry.shuffleOrder.map((secOrder) => secOrder.slice());
+        }
+      }
       return {
         userAnswers: JSON.parse(JSON.stringify(entry.userAnswers)),
         elapsedSeconds,
         limitMinutes,
         turboMode: Boolean(entry.turboMode),
         turboChecked: sanitizedTurboChecked,
+        shuffleOrder: sanitizedShuffleOrder,
         updatedAt
       };
     }
@@ -429,12 +692,14 @@ createApp({
           }
         }
       }
+      const shuffleOrder = getShuffleOrder(activeExam.value);
       const payload = {
         userAnswers: JSON.parse(JSON.stringify(userAnswers.value)),
         elapsedSeconds: snap.elapsedSeconds,
         limitMinutes: quizTimerLimit.value,
         turboMode: Boolean(quizTurboMode.value),
         turboChecked: savedTurboChecked,
+        shuffleOrder: shuffleOrder || null,
         updatedAt: Date.now()
       };
       savedProgressMap.value = {
@@ -505,13 +770,16 @@ createApp({
       if (activeMutationCount > 0) return;
       const epoch = syncMutationEpoch;
       try {
-        const resp = await fetch('/api/exams', { cache: 'no-store' });
+        const url = lastServerVersion !== -1
+          ? `/api/exams?since=${encodeURIComponent(lastServerVersion)}`
+          : '/api/exams';
+        const resp = await fetch(url, { cache: 'no-store' });
         if (!resp.ok) return;
         const data = await resp.json();
         if (activeMutationCount > 0 || epoch !== syncMutationEpoch) return;
         if (!serverConnected.value) serverConnected.value = true;
         const version = Number(data?.version ?? 0);
-        if (lastServerVersion !== -1 && version === lastServerVersion) {
+        if (data?.unchanged === true || (lastServerVersion !== -1 && version === lastServerVersion)) {
           return;
         }
         const serverExams = Array.isArray(data?.exams) ? data.exams : [];
@@ -705,7 +973,7 @@ createApp({
       if (typeof window === 'undefined' || window.location.protocol === 'file:') return;
       if (document.hidden || serverSyncTimer !== null) return;
       serverSyncTimer = setInterval(() => {
-        if (!document.hidden) {
+        if (!document.hidden && view.value !== 'quiz') {
           syncExamsFromServer({ notify: true });
         }
       }, 2500);
@@ -716,7 +984,9 @@ createApp({
       if (document.hidden) {
         stopServerSyncInterval();
       } else {
-        syncExamsFromServer({ notify: true });
+        if (view.value !== 'quiz') {
+          syncExamsFromServer({ notify: true });
+        }
         startServerSyncInterval();
       }
     }
@@ -948,11 +1218,16 @@ createApp({
       pendingDeleteId.value = null;
       showSubmitConfirm.value = false;
       showExitQuizConfirm.value = false;
+      showEditorExitConfirm.value = false;
+      editorCleanSnapshot = null;
+      quizSubmittedAt.value = null;
       exitConfirmAutoPaused = false;
       pendingResumeQuiz.value = null;
       isReviewingHistory.value = false;
       quizTurboMode.value = false;
       turboChecked.value = {};
+      turboDetailsCache = Object.create(null);
+      canonicalQuizExam = null;
       editorLeftPanel.value = 'edit';
       if (initialTab === 'stats' || initialTab === 'diligence') {
         profileTab.value = initialTab;
@@ -1000,14 +1275,19 @@ createApp({
       isReviewingHistory.value = true;
       quizTurboMode.value = false;
       turboChecked.value = {};
+      turboDetailsCache = Object.create(null);
       activeExamId.value = found.id;
-      activeExam.value = parsed.data;
+      const taggedExam = tagCanonicalIndices(parsed.data);
+      canonicalQuizExam = taggedExam;
+      activeExam.value = taggedExam;
       userAnswers.value = JSON.parse(JSON.stringify(attempt.userAnswers || {}));
       gradeResult.value = gradeExam(parsed.data, userAnswers.value);
+      quizRenderEpoch.value++;
       showSubmitConfirm.value = false;
       showExitQuizConfirm.value = false;
       exitConfirmAutoPaused = false;
       quizAutoSubmitted.value = Boolean(attempt.autoSubmitted);
+      quizSubmittedAt.value = attempt.submittedAt || null;
       quizTimerLimit.value = attempt.limitMinutes || parsed.data.meta.time_limit || 0;
       const elapsedSec = attempt.elapsedSeconds || 0;
       const elapsedDisp = formatDuration(elapsedSec);
@@ -1032,6 +1312,39 @@ createApp({
       }
       isReviewingHistory.value = false;
       startQuiz(found.id);
+    }
+
+    function exportHistoryAttempt(attempt) {
+      if (!attempt) return;
+      const found = exams.value.find((e) => e.id === attempt.examId);
+      if (!found) {
+        showToast('Đề gốc đã bị xóa nên không thể xuất chi tiết câu hỏi.', 'error');
+        return;
+      }
+      const parsed = parseExamYaml(found.rawYaml);
+      if (!parsed.ok) {
+        showToast('Đề gốc đang bị lỗi định dạng YAML.', 'error');
+        return;
+      }
+      try {
+        const answers = attempt.userAnswers && typeof attempt.userAnswers === 'object'
+          ? attempt.userAnswers
+          : {};
+        const graded = gradeExam(parsed.data, answers);
+        downloadAttemptExport({
+          exam: parsed.data,
+          userAnswers: answers,
+          gradeResult: graded,
+          elapsedSeconds: attempt.elapsedSeconds || 0,
+          limitMinutes: attempt.limitMinutes || parsed.data.meta.time_limit || 0,
+          submittedAt: attempt.submittedAt || Date.now(),
+          autoSubmitted: Boolean(attempt.autoSubmitted)
+        });
+        showToast('Đã xuất file bài làm (.md)', 'success');
+      } catch (err) {
+        console.error('Lỗi khi xuất bài làm từ lịch sử:', err);
+        showToast('Không thể xuất file bài làm.', 'error');
+      }
     }
 
     function requestDeleteHistoryAttempt(attempt) {
@@ -1321,6 +1634,7 @@ createApp({
     }
 
     function closeContextMenu() {
+      hasOpenContextMenu = false;
       contextMenu.value = null;
     }
 
@@ -1348,18 +1662,21 @@ createApp({
         return;
       }
       const pos = clampMenuPos(e);
+      hasOpenContextMenu = true;
       contextMenu.value = { x: pos.x, y: pos.y, type: 'blank', target: null };
     }
 
     function openFolderContextMenu(e, folder) {
       if (view.value !== 'list' || !folder) return;
       const pos = clampMenuPos(e);
+      hasOpenContextMenu = true;
       contextMenu.value = { x: pos.x, y: pos.y, type: 'folder', target: folder };
     }
 
     function openExamContextMenu(e, card) {
       if (view.value !== 'list' || !card) return;
       const pos = clampMenuPos(e);
+      hasOpenContextMenu = true;
       contextMenu.value = { x: pos.x, y: pos.y, type: 'exam', target: card };
     }
 
@@ -1774,22 +2091,16 @@ createApp({
 
     const quizProgressText = computed(() => {
       if (!activeExam.value) return '';
-      let total = 0;
+      const flat = quizQuestionMeta.value.flat;
+      const total = flat.length;
+      if (gradeResult.value) return `Đã nộp bài · ${total} câu`;
       let answered = 0;
-      activeExam.value.sections.forEach((sec, sIdx) => {
-        sec.questions.forEach((q, qIdx) => {
-          if (q.type === 'group' && Array.isArray(q.questions)) {
-            q.questions.forEach((subQ, subIdx) => {
-              total++;
-              if (isQuestionAnswered(subQ, userAnswers.value[`${sIdx}_${qIdx}_${subIdx}`])) answered++;
-            });
-          } else {
-            total++;
-            if (isQuestionAnswered(q, userAnswers.value[`${sIdx}_${qIdx}`])) answered++;
-          }
-        });
-      });
-      return gradeResult.value ? `Đã nộp bài · ${total} câu` : `Đã làm ${answered} / ${total} câu`;
+      const ansMap = userAnswers.value;
+      for (let i = 0; i < total; i++) {
+        const item = flat[i];
+        if (isQuestionAnswered(item.q, ansMap[item.key])) answered++;
+      }
+      return `Đã làm ${answered} / ${total} câu`;
     });
 
     function clearPreviewSyncTimer() {
@@ -1983,11 +2294,16 @@ createApp({
       pendingDeleteId.value = null;
       showSubmitConfirm.value = false;
       showExitQuizConfirm.value = false;
+      showEditorExitConfirm.value = false;
+      editorCleanSnapshot = null;
+      quizSubmittedAt.value = null;
       exitConfirmAutoPaused = false;
       pendingResumeQuiz.value = null;
       activeExamId.value = null;
       quizTurboMode.value = false;
       turboChecked.value = {};
+      turboDetailsCache = Object.create(null);
+      canonicalQuizExam = null;
       closeContextMenu();
       folderModal.value = null;
       moveModal.value = null;
@@ -2555,6 +2871,77 @@ createApp({
       }
     }
 
+    function normalizeLineEndings(str) {
+      return String(str ?? '').replace(/\r\n/g, '\n');
+    }
+
+    function captureEditorSnapshot() {
+      return {
+        yaml: normalizeLineEndings(yamlText.value),
+        title: String(editorTitle.value ?? ''),
+        folder: normalizeFolderPath(editorFolder.value ?? ''),
+        timeLimit: String(editorTimeLimit.value ?? '').trim()
+      };
+    }
+
+    function isEditorDirty() {
+      if (!editorCleanSnapshot) return false;
+      const curYaml = normalizeLineEndings(monacoEditor ? monacoEditor.getValue() : yamlText.value);
+      if (curYaml !== editorCleanSnapshot.yaml) return true;
+      if (String(editorTitle.value ?? '') !== editorCleanSnapshot.title) return true;
+      if (normalizeFolderPath(editorFolder.value ?? '') !== editorCleanSnapshot.folder) return true;
+      if (String(editorTimeLimit.value ?? '').trim() !== editorCleanSnapshot.timeLimit) return true;
+      if (typeof document !== 'undefined' && document.getElementById('editor-time-limit-input')?.validity?.badInput) {
+        return true;
+      }
+      return false;
+    }
+
+    function requestExitEditor() {
+      flushPreviewSync();
+      if (yamlDebounceTimer !== null) {
+        validateAndPreview();
+      }
+      if (!isEditorDirty()) {
+        goList();
+        return;
+      }
+      showEditorJumpMenu.value = false;
+      showEditorExitConfirm.value = true;
+      nextTick(() => {
+        const focusTarget = (canSaveExam.value && validatedData.value)
+          ? document.getElementById('btn-editor-save-exit')
+          : document.getElementById('btn-editor-cancel-exit');
+        if (focusTarget) focusTarget.focus();
+      });
+    }
+
+    function cancelExitEditor() {
+      showEditorExitConfirm.value = false;
+    }
+
+    function discardAndExitEditor() {
+      clearPreviewSyncTimer();
+      clearTimeout(yamlDebounceTimer);
+      yamlDebounceTimer = null;
+      showEditorExitConfirm.value = false;
+      editorCleanSnapshot = null;
+      goList();
+    }
+
+    function saveAndExitEditor() {
+      flushPreviewSync();
+      if (yamlDebounceTimer !== null) {
+        validateAndPreview();
+      }
+      if (!validatedData.value || !canSaveExam.value) {
+        showToast('YAML đang có lỗi, vui lòng sửa trước khi lưu.', 'error');
+        return;
+      }
+      showEditorExitConfirm.value = false;
+      saveCurrentExam();
+    }
+
     async function openEditor(examId) {
       clearPreviewSyncTimer();
       clearTimeout(yamlDebounceTimer);
@@ -2569,11 +2956,16 @@ createApp({
       disposeMonaco();
       destroySortables();
       showExitQuizConfirm.value = false;
+      showEditorExitConfirm.value = false;
+      editorCleanSnapshot = null;
+      quizSubmittedAt.value = null;
       exitConfirmAutoPaused = false;
       pendingResumeQuiz.value = null;
       activeExamId.value = null;
       quizTurboMode.value = false;
       turboChecked.value = {};
+      turboDetailsCache = Object.create(null);
+      canonicalQuizExam = null;
       editingId.value = examId || null;
       editorErrors.value = [];
       editorLeftPanel.value = 'edit';
@@ -2607,6 +2999,8 @@ createApp({
         canSaveExam.value = true;
         nextTick(initSortables);
       }
+
+      editorCleanSnapshot = captureEditorSnapshot();
 
       await nextTick();
       if (view.value !== 'editor') return;
@@ -2830,20 +3224,30 @@ createApp({
         : (parsed.data.meta.time_limit || 0);
       const initialElapsedSeconds = resumeSaved && saved ? (saved.elapsedSeconds || 0) : 0;
 
+      const taggedCanonical = tagCanonicalIndices(parsed.data);
+      canonicalQuizExam = taggedCanonical;
+      const initialExam = resumeSaved && saved && Array.isArray(saved.shuffleOrder)
+        ? applyShuffleOrder(taggedCanonical, saved.shuffleOrder)
+        : taggedCanonical;
+
       triggerRichTextLoad();
       isReviewingHistory.value = false;
       activeExamId.value = examId;
-      activeExam.value = parsed.data;
+      activeExam.value = initialExam;
       userAnswers.value = initialAnswers;
       quizTurboMode.value = resumeSaved && saved ? Boolean(saved.turboMode) : Boolean(turboModePref.value);
       turboChecked.value = resumeSaved && saved ? { ...(saved.turboChecked || {}) } : {};
+      turboDetailsCache = Object.create(null);
+      lastMouseOptionHandledKey = '';
       gradeResult.value = null;
       showSubmitConfirm.value = false;
       showExitQuizConfirm.value = false;
       exitConfirmAutoPaused = false;
       pendingResumeQuiz.value = null;
       quizAutoSubmitted.value = false;
+      quizSubmittedAt.value = null;
       quizTimerLimit.value = Number.isFinite(rawLimit) ? rawLimit : 0;
+      quizRenderEpoch.value++;
       view.value = 'quiz';
       quizTimer.start(quizTimerLimit.value, { initialElapsedSeconds });
       applyTimerSnap(quizTimer.getSnapshot(), { syncFinal: true });
@@ -2858,9 +3262,12 @@ createApp({
 
       const saved = savedProgressMap.value[examId];
       if (saved) {
+        const previewExam = Array.isArray(saved.shuffleOrder)
+          ? applyShuffleOrder(tagCanonicalIndices(parsed.data), saved.shuffleOrder)
+          : parsed.data;
         let totalQuestions = 0;
         let answeredCount = 0;
-        parsed.data.sections.forEach((sec, sIdx) => {
+        previewExam.sections.forEach((sec, sIdx) => {
           sec.questions.forEach((q, qIdx) => {
             if (q.type === 'group' && Array.isArray(q.questions)) {
               q.questions.forEach((subQ, subIdx) => {
@@ -2911,17 +3318,67 @@ createApp({
       pendingResumeQuiz.value = null;
     }
 
+    const canShuffleActiveExam = computed(() => {
+      const secs = activeExam.value?.sections;
+      if (!Array.isArray(secs)) return false;
+      return secs.some((sec) => Array.isArray(sec?.questions) && sec.questions.length >= 2);
+    });
+
+    function shuffleTurboQuiz() {
+      if (!activeExam.value || !quizTurboMode.value || gradeResult.value !== null || showExitQuizConfirm.value) return;
+      const res = shuffleExamState({
+        exam: activeExam.value,
+        userAnswers: userAnswers.value,
+        turboChecked: turboChecked.value
+      });
+      if (!res || !res.shuffled) {
+        showToast('Đề không đủ câu để đảo thứ tự', 'error', 2000);
+        return;
+      }
+      turboDetailsCache = Object.create(null);
+      lastMouseOptionHandledKey = '';
+      activeExam.value = res.exam;
+      userAnswers.value = res.userAnswers;
+      turboChecked.value = res.turboChecked;
+      quizRenderEpoch.value++;
+      window.scrollTo(0, 0);
+      showToast('Đã đảo thứ tự câu hỏi', 'success', 1800);
+    }
+
+    function resetTurboQuiz() {
+      if (!activeExam.value || !quizTurboMode.value || gradeResult.value !== null || showExitQuizConfirm.value) return;
+      activeExam.value = canonicalQuizExam ? tagCanonicalIndices(canonicalQuizExam) : activeExam.value;
+      userAnswers.value = {};
+      turboChecked.value = {};
+      turboDetailsCache = Object.create(null);
+      lastMouseOptionHandledKey = '';
+      showSubmitConfirm.value = false;
+      clearSavedProgress(activeExamId.value);
+      quizRenderEpoch.value++;
+      quizTimer.start(quizTimerLimit.value);
+      applyTimerSnap(quizTimer.getSnapshot(), { syncFinal: true });
+      window.scrollTo(0, 0);
+      showToast('Đã xóa hết đáp án và quay về ban đầu', 'success', 1800);
+    }
+
     function retryQuiz() {
       if (!activeExam.value) return;
       isReviewingHistory.value = false;
       clearSavedProgress(activeExamId.value);
+      if (canonicalQuizExam) {
+        activeExam.value = tagCanonicalIndices(canonicalQuizExam);
+      }
       userAnswers.value = {};
       turboChecked.value = {};
+      turboDetailsCache = Object.create(null);
+      lastMouseOptionHandledKey = '';
       gradeResult.value = null;
       showSubmitConfirm.value = false;
       showExitQuizConfirm.value = false;
       exitConfirmAutoPaused = false;
       quizAutoSubmitted.value = false;
+      quizSubmittedAt.value = null;
+      quizRenderEpoch.value++;
       quizTimer.start(quizTimerLimit.value);
       applyTimerSnap(quizTimer.getSnapshot(), { syncFinal: true });
       window.scrollTo(0, 0);
@@ -3041,6 +3498,67 @@ createApp({
       return activeExam.value.sections.map((sec, sIdx) => getSectionNavItems(sec, sIdx));
     });
 
+    const quizQuestionMeta = computed(() => {
+      const exam = activeExam.value;
+      if (!exam || !Array.isArray(exam.sections)) {
+        return {
+          numMap: Object.create(null),
+          groupRangeMap: Object.create(null),
+          maxPointsMap: Object.create(null),
+          flat: []
+        };
+      }
+      const ptsMap = quizPointsSummary.value?.questionMaxPoints || {};
+      const numMap = Object.create(null);
+      const groupRangeMap = Object.create(null);
+      const maxPointsMap = Object.create(null);
+      const flat = [];
+      for (let sIdx = 0; sIdx < exam.sections.length; sIdx++) {
+        const qs = exam.sections[sIdx]?.questions || [];
+        let num = 1;
+        for (let qIdx = 0; qIdx < qs.length; qIdx++) {
+          const q = qs[qIdx];
+          if (q?.type === 'group' && Array.isArray(q.questions)) {
+            const start = num;
+            let grpSum = 0;
+            for (let subIdx = 0; subIdx < q.questions.length; subIdx++) {
+              const key = `${sIdx}_${qIdx}_${subIdx}`;
+              const subQ = q.questions[subIdx];
+              const mp = ptsMap[key] ?? 0;
+              numMap[key] = num++;
+              maxPointsMap[key] = mp;
+              grpSum += Number(mp);
+              flat.push({ key, q: subQ });
+            }
+            const end = Math.max(start, num - 1);
+            const gKey = `${sIdx}_${qIdx}`;
+            groupRangeMap[gKey] = end > start ? `Câu ${start}–${end}` : `Câu ${start}`;
+            maxPointsMap[gKey] = Number(grpSum.toFixed(4));
+          } else {
+            const key = `${sIdx}_${qIdx}`;
+            const mp = ptsMap[key] ?? 0;
+            numMap[key] = num++;
+            maxPointsMap[key] = mp;
+            flat.push({ key, q });
+          }
+        }
+      }
+      return { numMap, groupRangeMap, maxPointsMap, flat };
+    });
+
+    function getQuizQuestionNum(sIdx, qIdx, subIdx = null) {
+      return quizQuestionMeta.value.numMap[qKey(sIdx, qIdx, subIdx)] ?? (qIdx + 1);
+    }
+
+    function getQuizGroupRangeLabel(sIdx, qIdx) {
+      return quizQuestionMeta.value.groupRangeMap[`${sIdx}_${qIdx}`] || '';
+    }
+
+    function getQuizTargetQuestion(sIdx, qIdx, subIdx = null) {
+      const rawQ = activeExam.value?.sections?.[sIdx]?.questions?.[qIdx];
+      return (subIdx !== null && subIdx !== undefined) ? rawQ?.questions?.[subIdx] : rawQ;
+    }
+
     function hasSubQuestionText(subQ) {
       return Boolean(String(subQ?.question ?? '').trim());
     }
@@ -3064,12 +3582,14 @@ createApp({
       return sig;
     }
 
-    const turboDetails = computed(() => (
-      quizTurboMode.value &&
-      !gradeResult.value &&
-      activeExam.value &&
-      Object.keys(turboChecked.value).length > 0
-    ) ? gradeExam(activeExam.value, userAnswers.value).details : null);
+    function computeTurboQuestionDetail(sIdx, qIdx, subIdx = null) {
+      const id = qKey(sIdx, qIdx, subIdx);
+      const q = getQuizTargetQuestion(sIdx, qIdx, subIdx);
+      if (!q) return null;
+      const detail = gradeSingleQuestion(q, userAnswers.value[id], getQuizQuestionMaxPoints(sIdx, qIdx, subIdx)).detail;
+      turboDetailsCache[id] = detail;
+      return detail;
+    }
 
     function isQuestionRevealed(sIdx, qIdx, subIdx = null) {
       return Boolean(
@@ -3093,22 +3613,50 @@ createApp({
     function getDisplayDetail(sIdx, qIdx, subIdx = null) {
       const id = qKey(sIdx, qIdx, subIdx);
       if (gradeResult.value) return gradeResult.value.details[id];
-      return isQuestionRevealed(sIdx, qIdx, subIdx) ? turboDetails.value?.[id] : null;
+      if (!isQuestionRevealed(sIdx, qIdx, subIdx)) return null;
+      return turboDetailsCache[id] || computeTurboQuestionDetail(sIdx, qIdx, subIdx);
     }
 
     function getStatementDisplayResult(sIdx, qIdx, stIdx, subIdx = null) {
       const id = qKey(sIdx, qIdx, subIdx);
       if (gradeResult.value) return gradeResult.value.details[id]?.statementResults?.[stIdx];
-      return isTfStatementRevealed(sIdx, qIdx, stIdx, subIdx)
-        ? turboDetails.value?.[id]?.statementResults?.[stIdx]
-        : null;
+      if (!isTfStatementRevealed(sIdx, qIdx, stIdx, subIdx)) return null;
+      const detail = turboDetailsCache[id] || computeTurboQuestionDetail(sIdx, qIdx, subIdx);
+      return detail?.statementResults?.[stIdx] || null;
+    }
+
+    function selectMcOption(sIdx, qIdx, key, subIdx = null) {
+      if (gradeResult.value !== null || isQuestionLocked(sIdx, qIdx, subIdx)) return;
+      const id = qKey(sIdx, qIdx, subIdx);
+      if (userAnswers.value[id] === key && (!quizTurboMode.value || turboChecked.value[id])) return;
+      userAnswers.value[id] = key;
+      if (quizTurboMode.value) {
+        computeTurboQuestionDetail(sIdx, qIdx, subIdx);
+        turboChecked.value[id] = true;
+      }
+    }
+
+    function onMcOptionPointerDown(e, sIdx, qIdx, key, subIdx = null) {
+      if (e.pointerType !== 'mouse' || e.button !== 0) return;
+      if (gradeResult.value !== null || isQuestionLocked(sIdx, qIdx, subIdx)) return;
+      e.preventDefault();
+      lastMouseOptionHandledKey = `${qKey(sIdx, qIdx, subIdx)}_${key}`;
+      lastMouseOptionHandledAt = performance.now();
+      selectMcOption(sIdx, qIdx, key, subIdx);
+    }
+
+    function onMcLabelClick(e, id, key) {
+      if (lastMouseOptionHandledKey === `${id}_${key}` && (performance.now() - lastMouseOptionHandledAt) < 400) {
+        e.preventDefault();
+      }
     }
 
     function onMcAnswerChange(sIdx, qIdx, subIdx = null) {
       if (!quizTurboMode.value || gradeResult.value !== null) return;
       const id = qKey(sIdx, qIdx, subIdx);
       if (turboChecked.value[id]) return;
-      turboChecked.value = { ...turboChecked.value, [id]: true };
+      computeTurboQuestionDetail(sIdx, qIdx, subIdx);
+      turboChecked.value[id] = true;
     }
 
     function checkShortAnswerTurbo(sIdx, qIdx, subIdx = null) {
@@ -3118,11 +3666,19 @@ createApp({
         showToast('Vui lòng nhập đáp án trước khi kiểm tra', 'error', 1800);
         return;
       }
-      turboChecked.value = { ...turboChecked.value, [id]: true };
+      computeTurboQuestionDetail(sIdx, qIdx, subIdx);
+      turboChecked.value[id] = true;
     }
 
     function getTfPick(sIdx, qIdx, stIdx, subIdx = null) {
       return userAnswers.value[qKey(sIdx, qIdx, subIdx)]?.[stIdx];
+    }
+
+    function onTfBtnPointerDown(e, sIdx, qIdx, stIdx, val, subIdx = null) {
+      if (e.pointerType !== 'mouse' || e.button !== 0) return;
+      if (gradeResult.value !== null || isTfStatementRevealed(sIdx, qIdx, stIdx, subIdx)) return;
+      e.preventDefault();
+      setTfPick(sIdx, qIdx, stIdx, val, subIdx);
     }
 
     function setTfPick(sIdx, qIdx, stIdx, val, subIdx = null) {
@@ -3131,25 +3687,21 @@ createApp({
       const prevMap = userAnswers.value[qId] && typeof userAnswers.value[qId] === 'object'
         ? userAnswers.value[qId]
         : {};
-      userAnswers.value[qId] = { ...prevMap, [stIdx]: val };
+      if (prevMap[stIdx] === val && (!quizTurboMode.value || turboChecked.value[`${qId}__st_${stIdx}`])) return;
+      const nextMap = { ...prevMap, [stIdx]: val };
+      userAnswers.value[qId] = nextMap;
 
       if (quizTurboMode.value) {
-        const nextChecked = {
-          ...turboChecked.value,
-          [`${qId}__st_${stIdx}`]: true
-        };
-        const rawQ = activeExam.value?.sections?.[sIdx]?.questions?.[qIdx];
-        const targetQ = (subIdx !== null && subIdx !== undefined)
-          ? rawQ?.questions?.[subIdx]
-          : rawQ;
+        computeTurboQuestionDetail(sIdx, qIdx, subIdx);
+        turboChecked.value[`${qId}__st_${stIdx}`] = true;
+        const targetQ = getQuizTargetQuestion(sIdx, qIdx, subIdx);
         const statements = Array.isArray(targetQ?.statements) ? targetQ.statements : [];
         if (
           statements.length > 0 &&
-          statements.every((_, idx) => Boolean(nextChecked[`${qId}__st_${idx}`]) || typeof userAnswers.value[qId]?.[idx] === 'boolean')
+          statements.every((_, idx) => Boolean(turboChecked.value[`${qId}__st_${idx}`]) || typeof nextMap[idx] === 'boolean')
         ) {
-          nextChecked[qId] = true;
+          turboChecked.value[qId] = true;
         }
-        turboChecked.value = nextChecked;
       }
     }
 
@@ -3178,8 +3730,10 @@ createApp({
       exitConfirmAutoPaused = false;
       clearSavedProgress(activeExamId.value);
 
+      const nowTs = Date.now();
+      quizSubmittedAt.value = nowTs;
       if (!isReviewingHistory.value) {
-        const nowTs = Date.now();
+        const canonicalAnswers = remapAnswersToCanonical(activeExam.value, userAnswers.value || {});
         const attempt = sanitizeHistoryEntry({
           id: `att-${nowTs}-${Math.random().toString(36).slice(2, 6)}`,
           examId: activeExamId.value || '',
@@ -3193,7 +3747,7 @@ createApp({
           limitMinutes: quizTimerLimit.value,
           autoSubmitted,
           submittedAt: nowTs,
-          userAnswers: JSON.parse(JSON.stringify(userAnswers.value || {}))
+          userAnswers: canonicalAnswers
         });
         if (attempt) {
           quizHistory.value = [attempt, ...quizHistory.value].slice(0, MAX_HISTORY_ENTRIES);
@@ -3201,6 +3755,28 @@ createApp({
         }
       }
       window.scrollTo(0, 0);
+    }
+
+    function exportCurrentQuizResult() {
+      if (!activeExam.value || !gradeResult.value) {
+        showToast('Chưa có kết quả bài làm để xuất.', 'error');
+        return;
+      }
+      try {
+        downloadAttemptExport({
+          exam: activeExam.value,
+          userAnswers: userAnswers.value || {},
+          gradeResult: gradeResult.value,
+          elapsedSeconds: quizElapsedSeconds.value,
+          limitMinutes: quizTimerLimit.value,
+          submittedAt: quizSubmittedAt.value || Date.now(),
+          autoSubmitted: quizAutoSubmitted.value
+        });
+        showToast('Đã xuất file bài làm (.md)', 'success');
+      } catch (err) {
+        console.error('Lỗi khi xuất bài làm:', err);
+        showToast('Không thể xuất file bài làm.', 'error');
+      }
     }
 
     function scrollToQuestion(sIdx, qIdx, subIdx = null) {
@@ -3272,7 +3848,7 @@ createApp({
     }
 
     function getQuizQuestionMaxPoints(sIdx, qIdx, subIdx = null) {
-      return resolveItemMaxPoints(activeExam.value, quizPointsSummary.value, sIdx, qIdx, subIdx);
+      return quizQuestionMeta.value.maxPointsMap[qKey(sIdx, qIdx, subIdx)] ?? 0;
     }
 
     function onSectionPointsInput(sec, rawVal) {
@@ -3443,9 +4019,9 @@ createApp({
     }
 
     function quizOptionClass(q, sIdx, qIdx, key, subIdx = null) {
-      const d = getDisplayDetail(sIdx, qIdx, subIdx);
-      if (!d) return '';
       const picked = userAnswers.value[qKey(sIdx, qIdx, subIdx)];
+      const d = getDisplayDetail(sIdx, qIdx, subIdx);
+      if (!d) return picked === key ? 'opt-selected' : '';
       if (key === q.answer) return 'is-locked opt-correct';
       if (picked === key) return 'is-locked opt-wrong';
       return 'is-locked';
@@ -3474,12 +4050,12 @@ createApp({
     }
 
     function onGlobalWindowClick() {
-      if (contextMenu.value) closeContextMenu();
+      if (hasOpenContextMenu) closeContextMenu();
     }
 
     function onGlobalWindowKeydown(e) {
       if (e.key !== 'Escape') return;
-      if (contextMenu.value) {
+      if (hasOpenContextMenu) {
         closeContextMenu();
         return;
       }
@@ -3497,22 +4073,31 @@ createApp({
       }
       if (deleteHistoryModal.value) {
         deleteHistoryModal.value = null;
+        return;
+      }
+      if (showEditorExitConfirm.value) {
+        cancelExitEditor();
       }
     }
 
     function onGlobalWindowScroll() {
-      if (contextMenu.value) closeContextMenu();
+      if (hasOpenContextMenu) closeContextMenu();
     }
 
-    watch(view, (nextView) => {
+    watch(view, (nextView, prevView) => {
       if (nextView !== 'list') {
         closeContextMenu();
         folderModal.value = null;
         moveModal.value = null;
         deleteFolderModal.value = null;
+      } else if (prevView === 'quiz') {
+        syncExamsFromServer({ notify: true });
       }
       if (nextView !== 'profile') {
         deleteHistoryModal.value = null;
+      }
+      if (nextView !== 'editor') {
+        showEditorExitConfirm.value = false;
       }
     });
 
@@ -3541,6 +4126,32 @@ createApp({
       quizTimer.destroy();
     });
 
+    provide(QUIZ_CTX_KEY, {
+      userAnswers,
+      turboChecked,
+      gradeResult,
+      quizTurboMode,
+      quizProgressText,
+      getQuizQuestionNum,
+      getQuizQuestionMaxPoints,
+      formatPointNum,
+      isQuestionRevealed,
+      isTfStatementRevealed,
+      getDisplayDetail,
+      getStatementDisplayResult,
+      quizBadgeText,
+      quizNavCellClass,
+      hasSubQuestionText,
+      renderRichText: renderRichTextReactive,
+      selectMcOption,
+      onMcOptionPointerDown,
+      onMcLabelClick,
+      setTfPick,
+      onTfBtnPointerDown,
+      checkShortAnswerTurbo,
+      scrollToQuestion
+    });
+
     loadExams();
     startServerPolling();
 
@@ -3558,16 +4169,17 @@ createApp({
       openDeleteFolderModal, confirmDeleteFolder,
       pendingDeleteId, pendingDeleteTitle,
       editorTitle, editorFolder, editorTimeLimit, yamlText, validatedData, editorErrors, canSaveExam,
-      monacoReady, richTextReady, editorLeftPanel, setEditorLeftPanel, showEditorJumpMenu, jumpToEditorQuestion, copyLabel, previewPaneRef, editorStats, toast, serverConnected,
+      monacoReady, richTextReady, editorLeftPanel, setEditorLeftPanel, showEditorJumpMenu, showEditorExitConfirm, jumpToEditorQuestion, copyLabel, previewPaneRef, editorStats, toast, serverConnected,
       activeExam, activeExamId, userAnswers, gradeResult, showSubmitConfirm, pendingUnanswered, quizProgressText,
       showExitQuizConfirm, pendingResumeQuiz,
-      turboModePref, toggleTurboModePref, quizTurboMode, turboChecked,
+      turboModePref, toggleTurboModePref, quizTurboMode, turboChecked, quizRenderEpoch, canShuffleActiveExam,
+      shuffleTurboQuiz, resetTurboQuiz,
       isQuestionRevealed, isQuestionLocked, isTfStatementRevealed,
       getDisplayDetail, getStatementDisplayResult,
-      onMcAnswerChange, checkShortAnswerTurbo,
+      selectMcOption, onMcOptionPointerDown, onMcAnswerChange, checkShortAnswerTurbo,
       quizTimerLimit, quizTimerDisplayRef, quizElapsedDisplay, quizElapsedSeconds,
       quizTimerPaused, quizTimerStatus, quizTimerMode, quizAutoSubmitted,
-      quizSectionNavItems,
+      quizSectionNavItems, getQuizQuestionNum, getQuizGroupRangeLabel,
       quizHistory, userProfile, analyticsReady, profileTab, heatmapYear,
       calendarYear, calendarMonth, selectedWeekIndex,
       historyRangeFilter, historySubjectFilter, isReviewingHistory, deleteHistoryModal,
@@ -3575,7 +4187,7 @@ createApp({
       monthCalendar, weeklyBreakdown, historySubjectOptions, filteredHistoryList,
       formatAttemptDuration, formatAttemptTime,
       openProfile, saveProfileName, shiftCalendarMonth, selectCalendarWeek,
-      setHeatmapYear, filterHistoryBySubject, reviewHistoryAttempt, retryHistoryAttempt,
+      setHeatmapYear, filterHistoryBySubject, reviewHistoryAttempt, retryHistoryAttempt, exportHistoryAttempt,
       requestDeleteHistoryAttempt, requestClearFilteredHistory, confirmDeleteHistory,
       editorPointsSummary, quizPointsSummary, formatPointNum,
       getEditorQuestionMaxPoints, getQuizQuestionMaxPoints,
@@ -3589,7 +4201,7 @@ createApp({
       renderRichPreviewHtml: renderRichPreviewHtmlReactive,
       lineCount, focusRichInput,
       goList, requestDelete, confirmDelete,
-      openEditor, saveCurrentExam, onHeaderTitleInput, onHeaderFolderInput, onHeaderTimeLimitInput,
+      openEditor, requestExitEditor, cancelExitEditor, discardAndExitEditor, saveAndExitEditor, saveCurrentExam, onHeaderTitleInput, onHeaderFolderInput, onHeaderTimeLimitInput,
       copyAiPrompt, triggerImportYaml, handleImportYamlFile, exportYaml,
       handleYamlInput, handleYamlTab, onLeftPaneInteract, onYamlTextareaCursor, syncPreviewToYaml, scheduleSyncPreviewToYaml,
       changeQuestionType, changeSubQuestionType, addSubQuestion, deleteSubQuestion, moveSubQuestion,
@@ -3598,7 +4210,7 @@ createApp({
       moveQuestion, deleteQuestion, addSection, moveSection, deleteSection,
       startQuiz, resumeSavedQuiz, restartSavedQuiz, cancelResumeQuiz,
       retryQuiz, toggleQuizTimerPause, requestExitQuiz, cancelExitQuiz, confirmExitQuiz,
-      getTfPick, setTfPick, requestSubmitQuiz, finalizeSubmit,
+      getTfPick, setTfPick, onTfBtnPointerDown, requestSubmitQuiz, finalizeSubmit, exportCurrentQuizResult,
       scrollToQuestion, quizCardClass, quizBadgeClass, quizBadgeText,
       quizOptionClass, quizStatementClass, quizShortInputClass, quizNavCellClass
     };

@@ -13,6 +13,7 @@ const RE_SINGLE_P = /^<p>[\s\S]*<\/p>$/;
 const RE_P_OPEN = /<p>/g;
 const RE_MATH_TOKEN = /KATEXMATHTOKEN(\d+)END/g;
 const RE_NEWLINE = /\r?\n/g;
+const RE_RICH_SYNTAX = /[$*_`[\]~|#\\<>&@\r\n]|^\s*(?:[-+]|\d+[.)])\s|\+\+|--|==|http:\/\/|https:\/\/|www\./;
 
 let markedLib = null;
 let domPurifyLib = null;
@@ -106,12 +107,22 @@ export function renderRichText(str) {
   if (renderCache.has(input)) {
     cacheHits++;
     const cached = renderCache.get(input);
-    renderCache.delete(input);
-    renderCache.set(input, cached);
+    if (renderCache.size >= MAX_CACHE * 0.8) {
+      renderCache.delete(input);
+      renderCache.set(input, cached);
+    }
     return cached;
   }
 
   cacheMisses++;
+  if (!RE_RICH_SYNTAX.test(input)) {
+    const plain = escapeHtml(input);
+    if (renderCache.size >= MAX_CACHE) {
+      renderCache.delete(renderCache.keys().next().value);
+    }
+    renderCache.set(input, plain);
+    return plain;
+  }
   let mathTokens = null;
   let text = input;
   if (input.includes('$')) {

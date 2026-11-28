@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
+import socket
 import subprocess
 import sys
 import webbrowser
@@ -11,14 +14,20 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 from exam_store import (
+    ASSETS_DIR,
     BASE_DIR,
     DEFAULT_PORT,
+    _UNSET,
     _collect_ancestors,
     _normalize_folder_path,
     create_folder_path,
     delete_exam_by_id,
     delete_folder_path,
+    extract_exam_outline,
+    get_exam_by_id,
     move_exam_to_folder,
+    patch_exams_meta,
+    read_exam_summaries,
     read_store,
     rename_or_move_folder,
     summarize_exam,
@@ -32,9 +41,19 @@ BASE_URL = f"http://127.0.0.1:{PORT}/"
 HEALTH_URL = f"http://127.0.0.1:{PORT}/api/health"
 
 
-def _check_web_health() -> dict[str, Any] | None:
+def _is_port_open(host: str = "127.0.0.1", port: int = PORT, timeout: float = 0.12) -> bool:
     try:
-        with urlopen(HEALTH_URL, timeout=0.8) as resp:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _check_web_health() -> dict[str, Any] | None:
+    if not _is_port_open():
+        return None
+    try:
+        with urlopen(HEALTH_URL, timeout=0.4) as resp:
             if resp.status == 200:
                 return json.loads(resp.read().decode("utf-8"))
     except (URLError, OSError, ValueError):
@@ -78,6 +97,151 @@ def _start_web_server(open_browser: bool = True) -> dict[str, Any]:
         "url": BASE_URL,
         "health": info,
     }
+
+
+def _safe_asset_relpath(subdir: str | None, filename: str) -> Path:
+    clean_sub_parts = [
+        re.sub(r"[^a-zA-Z0-9_.-]+", "-", seg.strip()).strip("-")
+        for seg in str(subdir or "").replace("\\", "/").split("/")
+        if seg.strip() and seg.strip() not in (".", "..")
+    ]
+    raw_name = Path(str(filename or "").strip()).name
+    if not raw_name:
+        raise ValueError("Thiếu tên file asset (filename).")
+    stem = re.sub(r"[^a-zA-Z0-9_.-]+", "-", Path(raw_name).stem).strip("-") or "asset"
+    ext = Path(raw_name).suffix.lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"):
+        ext = ".png"
+    rel = Path(*clean_sub_parts) / f"{stem}{ext}" if clean_sub_parts else Path(f"{stem}{ext}")
+    full = (ASSETS_DIR / rel).resolve()
+    assets_root = ASSETS_DIR.resolve()
+    if assets_root not in full.parents and full != assets_root:
+        raise ValueError("Đường dẫn asset không hợp lệ.")
+    return rel
+
+
+def _save_exam_asset(args: dict[str, Any]) -> dict[str, Any]:
+    filename = str(args.get("filename") or "").strip()
+    subdir = str(args.get("subdir") or "").strip()
+    alt_text = str(args.get("alt") or "Hình minh họa").strip() or "Hình minh họa"
+    max_width_raw = args.get("max_width")
+    max_width = int(max_width_raw) if isinstance(max_width_raw, (int, float)) and max_width_raw > 0 else 480
+    trim_ws = bool(args.get("trim_whitespace", True))
+    padding = max(0, int(args.get("padding", 12)))
+
+    rel_path = _safe_asset_relpath(subdir, filename)
+    dest_path = ASSETS_DIR / rel_path
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    source_path_raw = str(args.get("source_path") or "").strip()
+    pdf_path_raw = str(args.get("pdf_path") or "").strip()
+
+    if bool(source_path_raw) == bool(pdf_path_raw):
+        raise ValueError("Phải truyền đúng một trong hai: 'source_path' (file ảnh có sẵn) hoặc 'pdf_path' (cắt hình từ PDF).")
+
+    width: int | None = None
+    height: int | None = None
+
+    if source_path_raw:
+        src = Path(source_path_raw)
+        if not src.is_file():
+            raise ValueError(f"Không tìm thấy file ảnh nguồn: {source_path_raw}")
+        if src.suffix.lower() == ".svg":
+            shutil.copy2(src, dest_path)
+        else:
+            try:
+                from PIL import Image, ImageChops
+
+                with Image.open(src) as im_in:
+                    im = im_in.convert("RGBA" if im_in.mode in ("RGBA", "LA") else "RGB")
+                    if trim_ws and im.mode == "RGB":
+                        bg = Image.new("RGB", im.size, (255, 255, 255))
+                        bbox = ImageChops.difference(im, bg).getbbox()
+                        if bbox:
+                            im = im.crop(bbox)
+                            if padding > 0:
+                                padded = Image.new("RGB", (im.width + 2 * padding, im.height + 2 * padding), (255, 255, 255))
+                                padded.paste(im, (padding, padding))
+                                im = padded
+                    if max_width and im.width > max_width:
+                        new_h = max(1, int(round(im.height * (max_width / im.width))))
+                        im = im.resize((max_width, new_h), Image.Resampling.LANCZOS)
+                    width, height = im.size
+                    im.save(dest_path, optimize=True)
+            except ImportError:
+                shutil.copy2(src, dest_path)
+    else:
+        pdf_file = Path(pdf_path_raw)
+        if not pdf_file.is_file():
+            raise ValueError(f"Không tìm thấy file PDF: {pdf_path_raw}")
+        page_num = int(args.get("page") or 1)
+        crop_box = args.get("crop_box")
+        if not isinstance(crop_box, list) or len(crop_box) != 4:
+            raise ValueError("Khi dùng 'pdf_path', bắt buộc truyền 'crop_box' gồm 4 số [x0, top, x1, bottom] theo tọa độ PDF point.")
+        x0, top, x1, bottom = (float(v) for v in crop_box)
+        if x1 <= x0 or bottom <= top:
+            raise ValueError("crop_box không hợp lệ: cần x1 > x0 và bottom > top.")
+        scale = float(args.get("scale") or 3.0)
+
+        try:
+            import pypdfium2 as pdfium
+            from PIL import Image, ImageChops
+        except ImportError as exc:
+            raise ValueError(f"Thiếu thư viện pypdfium2/Pillow để cắt PDF: {exc}") from exc
+
+        doc = pdfium.PdfDocument(str(pdf_file))
+        if not (1 <= page_num <= len(doc)):
+            raise ValueError(f"Số trang page={page_num} vượt ngoài phạm vi PDF (1..{len(doc)}).")
+        pil_page = doc[page_num - 1].render(scale=scale).to_pil().convert("RGB")
+        px_box = (
+            max(0, int(x0 * scale)),
+            max(0, int(top * scale)),
+            min(pil_page.width, int(x1 * scale)),
+            min(pil_page.height, int(bottom * scale)),
+        )
+        cropped = pil_page.crop(px_box)
+        if trim_ws:
+            bg = Image.new("RGB", cropped.size, (255, 255, 255))
+            bbox = ImageChops.difference(cropped, bg).getbbox()
+            if bbox:
+                cropped = cropped.crop(bbox)
+            if padding > 0:
+                padded = Image.new("RGB", (cropped.width + 2 * padding, cropped.height + 2 * padding), (255, 255, 255))
+                padded.paste(cropped, (padding, padding))
+                cropped = padded
+        if max_width and cropped.width > max_width:
+            new_h = max(1, int(round(cropped.height * (max_width / cropped.width))))
+            cropped = cropped.resize((max_width, new_h), Image.Resampling.LANCZOS)
+        width, height = cropped.size
+        cropped.save(dest_path, optimize=True)
+
+    url_path = "/assets/" + rel_path.as_posix()
+    return {
+        "saved": True,
+        "path": str(dest_path),
+        "url_path": url_path,
+        "width": width,
+        "height": height,
+        "size_bytes": dest_path.stat().st_size,
+        "markdown": f"![{alt_text}]({url_path})",
+    }
+
+
+def _diagnose_missing_snippet(cur_yaml: str, needle: str) -> str:
+    stripped_needle = needle.strip()
+    if stripped_needle and stripped_needle in cur_yaml:
+        return " (Gợi ý: tìm thấy nội dung khi bỏ khoảng trắng đầu/cuối — hãy kiểm tra lại dấu cách thụt lề hoặc dòng trống)."
+    first_non_empty = next((ln.strip() for ln in needle.splitlines() if ln.strip()), "")
+    if first_non_empty and len(first_non_empty) >= 6:
+        matches = [
+            idx
+            for idx, ln in enumerate(cur_yaml.splitlines(), start=1)
+            if first_non_empty in ln
+        ]
+        if matches:
+            sample = ", ".join(str(m) for m in matches[:5])
+            return f" (Gợi ý: dòng đầu tiên khớp một phần tại dòng {sample} — hãy kiểm tra thụt lề hoặc ký tự liền sau)."
+    return ""
 
 
 _OPTIONS_SCHEMA: dict[str, Any] = {
@@ -159,7 +323,7 @@ _SECTIONS_SCHEMA: dict[str, Any] = {
                         },
                         "content": {
                             "type": "string",
-                            "description": "Đoạn văn / ngữ liệu chung của nhóm (bắt buộc với type='group', hỗ trợ Markdown/LaTeX/bảng).",
+                            "description": "Đoạn văn / ngữ liệu chung của nhóm (bắt buộc với type='group', hỗ trợ Markdown/LaTeX/bảng/ảnh).",
                         },
                         "questions": {
                             "type": "array",
@@ -186,7 +350,7 @@ _SECTIONS_SCHEMA: dict[str, Any] = {
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "list_exams",
-        "description": "Liệt kê đề thi hiện có trong OTDO (id, tiêu đề, đường dẫn thư mục, môn gốc, số câu hỏi, thời gian, ghim) kèm danh sách thư mục và môn học.",
+        "description": "Liệt kê đề thi hiện có trong OTDO (id, tiêu đề, đường dẫn thư mục, môn gốc, số câu hỏi, thời gian, ghim) với bộ lọc thư mục, từ khóa tìm kiếm và giới hạn kết quả.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -202,23 +366,43 @@ TOOLS: list[dict[str, Any]] = [
                     "type": "boolean",
                     "description": "Nếu true, chỉ trả về các đề đang được ghim (mặc định false).",
                 },
+                "query": {
+                    "type": "string",
+                    "description": "Tùy chọn tìm kiếm không phân biệt hoa thường theo tiêu đề, id hoặc thư mục.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Tùy chọn giới hạn số lượng đề trả về (1..500) để tiết kiệm context khi kho đề lớn.",
+                },
+                "include_folders": {
+                    "type": "boolean",
+                    "description": "Có đính kèm danh sách folders và subjects hay không (mặc định true).",
+                },
             },
         },
     },
     {
         "name": "get_exam",
-        "description": "Đọc toàn bộ nội dung YAML và thông tin chi tiết của một đề thi theo id.",
+        "description": "Đọc thông tin chi tiết của một đề thi theo id. Hỗ trợ đọc toàn bộ rawYaml, chỉ xem dàn ý (outline_only=true), hoặc chỉ trích xuất 1 phần (section_index).",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "id": {"type": "string", "description": "ID của đề thi (lấy từ list_exams)."}
+                "id": {"type": "string", "description": "ID của đề thi (lấy từ list_exams)."},
+                "outline_only": {
+                    "type": "boolean",
+                    "description": "Nếu true, chỉ trả về dàn ý các phần, điểm số, tóm tắt từng câu và số dòng YAML (không trả về rawYaml dài).",
+                },
+                "section_index": {
+                    "type": "integer",
+                    "description": "Tùy chọn chỉ số phần (bắt đầu từ 1) để chỉ đọc phần YAML và dàn ý của đúng phần đó.",
+                },
             },
             "required": ["id"],
         },
     },
     {
         "name": "create_exam",
-        "description": "Tạo một đề thi mới và đẩy thẳng lên web OTDO. Có thể truyền structured object (title, folder, time_limit, sections — hỗ trợ cả type='group' cho đọc hiểu/điền khuyết) hoặc raw_yaml.",
+        "description": "Tạo một đề thi mới và đẩy thẳng lên web OTDO. Có thể truyền structured object (title, folder, time_limit, sections — hỗ trợ cả type='group' cho đọc hiểu/điền khuyết và nhúng ảnh ![alt](/assets/...)) hoặc raw_yaml.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -260,16 +444,30 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "replace_exam_snippet",
-        "description": "Tìm và thay thế chính xác một đoạn text trong rawYaml của đề thi theo id (tiện để sửa nhanh 1 câu hỏi, đáp án hoặc lời giải trong đề dài).",
+        "description": "Sửa nhanh một hoặc nhiều đoạn text trong rawYaml của đề thi theo id trong 1 lần gọi nguyên tử (validate 1 lần, ghi file 1 lần). Truyền old_text/new_text (1 chỗ) HOẶC mảng edits (nhiều chỗ).",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "id": {"type": "string", "description": "ID của đề thi."},
-                "old_text": {"type": "string", "description": "Đoạn text gốc cần thay (phải khớp duy nhất 1 lần hoặc đặt replace_all=true)."},
-                "new_text": {"type": "string", "description": "Đoạn text mới thay thế."},
+                "old_text": {"type": "string", "description": "Đoạn text gốc cần thay (dùng khi sửa 1 chỗ)."},
+                "new_text": {"type": "string", "description": "Đoạn text mới thay thế (dùng khi sửa 1 chỗ)."},
                 "replace_all": {"type": "boolean", "description": "Mặc định false."},
+                "edits": {
+                    "type": "array",
+                    "description": "Danh sách nhiều thao tác thay thế tuần tự trong 1 lần gọi (tiện sửa nhiều câu/điểm số ở các vị trí cách xa nhau mà không tốn nhiều turn).",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "old_text": {"type": "string"},
+                            "new_text": {"type": "string"},
+                            "replace_all": {"type": "boolean"},
+                        },
+                        "required": ["old_text", "new_text"],
+                    },
+                },
             },
-            "required": ["id", "old_text", "new_text"],
+            "required": ["id"],
         },
     },
     {
@@ -321,21 +519,86 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "move_exam",
-        "description": "Di chuyển nhanh một đề thi sang thư mục mới (chỉ cập nhật meta.folder và tùy chọn pinned mà không cần viết lại nội dung câu hỏi).",
+        "description": "Di chuyển nhanh 1 hoặc nhiều đề thi sang thư mục mới, hoặc cập nhật nhanh metadata (pinned, title, time_limit) mà không cần viết lại nội dung câu hỏi.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "id": {"type": "string", "description": "ID của đề thi cần di chuyển."},
+                "id": {"type": "string", "description": "ID của 1 đề thi cần cập nhật (hoặc dùng 'ids' cho nhiều đề)."},
+                "ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Danh sách ID nhiều đề thi để di chuyển / ghim hàng loạt trong 1 lần gọi.",
+                },
                 "folder": {
                     "type": "string",
                     "description": "Đường dẫn thư mục đích (vd: \"Toán/Đề thi thử/Sở GD\"); truyền chuỗi rỗng \"\" để chuyển về Chưa phân loại.",
                 },
                 "pinned": {
                     "type": "boolean",
-                    "description": "Tùy chọn cập nhật trạng thái ghim đồng thời.",
+                    "description": "Tùy chọn cập nhật trạng thái ghim.",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Tùy chọn đổi tiêu đề đề thi (chỉ áp dụng khi truyền 1 đề).",
+                },
+                "time_limit": {
+                    "type": "integer",
+                    "description": "Tùy chọn cập nhật thời gian làm bài (1..600 phút, hoặc 0 để xóa giới hạn thời gian).",
                 },
             },
-            "required": ["id", "folder"],
+        },
+    },
+    {
+        "name": "save_exam_asset",
+        "description": "Lưu hoặc cắt hình vẽ / đồ thị / bảng biến thiên trực tiếp từ file PDF hoặc file ảnh vào thư mục assets/ của OTDO, trả về cú pháp Markdown ![alt](/assets/...) để nhúng thẳng vào câu hỏi hoặc lời giải.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "Tên file ảnh đầu ra (vd: \"c1_bbt.png\").",
+                },
+                "subdir": {
+                    "type": "string",
+                    "description": "Thư mục con bên trong assets/ để gom nhóm ảnh theo đề (vd: \"toan12-de01\").",
+                },
+                "source_path": {
+                    "type": "string",
+                    "description": "Đường dẫn tuyệt đối tới file ảnh nguồn có sẵn (dùng khi copy/tối ưu ảnh sẵn có).",
+                },
+                "pdf_path": {
+                    "type": "string",
+                    "description": "Đường dẫn tuyệt đối tới file PDF nguồn (dùng khi cắt trực tiếp hình vẽ từ trang PDF).",
+                },
+                "page": {
+                    "type": "integer",
+                    "description": "Số trang PDF cần cắt (bắt đầu từ 1, dùng kèm pdf_path).",
+                },
+                "crop_box": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "minItems": 4,
+                    "maxItems": 4,
+                    "description": "Khung cắt [x0, top, x1, bottom] tính theo đơn vị PDF point (dùng kèm pdf_path).",
+                },
+                "max_width": {
+                    "type": "integer",
+                    "description": "Chiều rộng tối đa (px, mặc định 480) để ảnh sắc nét và vừa vặn trên thẻ câu hỏi.",
+                },
+                "trim_whitespace": {
+                    "type": "boolean",
+                    "description": "Tự động cắt viền trắng thừa và chừa lề gọn gàng (mặc định true).",
+                },
+                "padding": {
+                    "type": "integer",
+                    "description": "Độ rộng lề trắng bao quanh sau khi trim (px, mặc định 12).",
+                },
+                "alt": {
+                    "type": "string",
+                    "description": "Mô tả alt cho thẻ ảnh Markdown (mặc định \"Hình minh họa\").",
+                },
+            },
+            "required": ["filename"],
         },
     },
     {
@@ -355,15 +618,14 @@ TOOLS: list[dict[str, Any]] = [
 
 
 def _build_folder_tree(
-    store: dict[str, Any],
-    summaries: list[dict[str, Any]] | None = None,
+    persisted_folders: list[str],
+    summaries: list[dict[str, Any]],
 ) -> tuple[list[str], list[str], dict[str, int], dict[str, int]]:
-    items = summaries if summaries is not None else [summarize_exam(e) for e in store.get("exams", [])]
     seen_folders: set[str] = set()
-    for raw_f in store.get("folders") or []:
+    for raw_f in persisted_folders or []:
         for anc in _collect_ancestors(raw_f):
             seen_folders.add(anc)
-    for item in items:
+    for item in summaries:
         for anc in _collect_ancestors(item.get("folder") or ""):
             seen_folders.add(anc)
 
@@ -375,7 +637,7 @@ def _build_folder_tree(
     subject_counts: dict[str, int] = {}
     subjects_set: set[str] = {f.split("/")[0] for f in all_folders}
 
-    for item in items:
+    for item in summaries:
         cur_folder = item.get("folder") or ""
         if not cur_folder:
             continue
@@ -393,26 +655,35 @@ def _build_folder_tree(
     return all_folders, subjects, folder_counts, subject_counts
 
 
+def _build_folder_tree_from_store(
+    store: dict[str, Any],
+) -> tuple[list[str], list[str], dict[str, int], dict[str, int]]:
+    items = [summarize_exam(e) for e in store.get("exams", [])]
+    return _build_folder_tree(store.get("folders") or [], items)
+
+
 def _handle_tool_call(name: str, args: dict[str, Any]) -> dict[str, Any]:
     if name == "list_exams":
-        store = read_store()
-        all_items = [summarize_exam(e) for e in store["exams"]]
-        all_folders, subjects, _, _ = _build_folder_tree(store, all_items)
+        version, all_items, persisted_folders = read_exam_summaries()
+        include_folders = bool(args.get("include_folders", True))
+        all_folders, subjects, _, _ = _build_folder_tree(persisted_folders, all_items)
 
         has_folder_arg = "folder" in args and args.get("folder") is not None
-        folder_filter = _normalize_folder_path(args.get("folder")).lower() if has_folder_arg else ""
+        folder_filter = _normalize_folder_path(args.get("folder")).casefold() if has_folder_arg else ""
         exact = bool(args.get("exact", False))
         pinned_only = bool(args.get("pinned_only", False))
+        query = str(args.get("query") or "").strip().casefold()
 
         items = all_items
         if folder_filter:
             if exact:
-                items = [x for x in items if x["folder"].lower() == folder_filter]
+                items = [x for x in items if x["folder"].casefold() == folder_filter]
             else:
+                prefix = folder_filter + "/"
                 items = [
                     x
                     for x in items
-                    if x["folder"].lower() == folder_filter or x["folder"].lower().startswith(folder_filter + "/")
+                    if x["folder"].casefold() == folder_filter or x["folder"].casefold().startswith(prefix)
                 ]
         elif has_folder_arg and exact:
             items = [x for x in items if x["folder"] == ""]
@@ -420,23 +691,60 @@ def _handle_tool_call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         if pinned_only:
             items = [x for x in items if x["pinned"]]
 
-        return {
-            "version": store["version"],
+        if query:
+            items = [
+                x
+                for x in items
+                if query in x["title"].casefold()
+                or query in x["id"].casefold()
+                or query in x["folder"].casefold()
+            ]
+
+        total_matched = len(items)
+        limit_raw = args.get("limit")
+        if limit_raw is not None:
+            limit = max(1, min(500, int(limit_raw)))
+            items = items[:limit]
+
+        payload: dict[str, Any] = {
+            "version": version,
             "count": len(items),
+            "total_matched": total_matched,
             "exams": items,
-            "folders": all_folders,
-            "subjects": subjects,
-            "web_server_running": _check_web_health() is not None,
+            "web_server_running": _is_port_open(),
             "web_url": BASE_URL,
         }
+        if include_folders:
+            payload["folders"] = all_folders
+            payload["subjects"] = subjects
+        return payload
 
     if name == "get_exam":
         eid = str(args.get("id") or "").strip()
-        store = read_store()
-        found = next((e for e in store["exams"] if e["id"] == eid), None)
+        found = get_exam_by_id(eid)
         if not found:
             raise ValueError(f"Không tìm thấy đề thi có id '{eid}'.")
-        return {**summarize_exam(found), "rawYaml": found["rawYaml"]}
+
+        summary = summarize_exam(found)
+        outline_only = bool(args.get("outline_only", False))
+        sec_idx_raw = args.get("section_index")
+
+        if outline_only or sec_idx_raw is not None:
+            outline = extract_exam_outline(found["rawYaml"])
+            if sec_idx_raw is not None:
+                sec_idx = int(sec_idx_raw)
+                if not (1 <= sec_idx <= len(outline)):
+                    raise ValueError(f"section_index={sec_idx} nằm ngoài phạm vi số phần của đề (1..{len(outline)}).")
+                sec_meta = outline[sec_idx - 1]
+                yaml_lines = found["rawYaml"].replace("\r\n", "\n").replace("\r", "\n").split("\n")
+                slice_yaml = "\n".join(yaml_lines[sec_meta["start_line"] - 1 : sec_meta["end_line"]]) + "\n"
+                out = {**summary, "section": sec_meta}
+                if not outline_only:
+                    out["sectionYaml"] = slice_yaml
+                return out
+            return {**summary, "sections_outline": outline}
+
+        return {**summary, "rawYaml": found["rawYaml"]}
 
     if name == "create_exam":
         raw_yaml = args.get("raw_yaml")
@@ -461,8 +769,7 @@ def _handle_tool_call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         eid = str(args.get("id") or "").strip()
         if not eid:
             raise ValueError("Thiếu id đề thi.")
-        store = read_store()
-        existing = next((e for e in store["exams"] if e["id"] == eid), None)
+        existing = get_exam_by_id(eid)
         if not existing:
             raise ValueError(f"Không tìm thấy đề thi có id '{eid}'.")
 
@@ -473,7 +780,7 @@ def _handle_tool_call(name: str, args: dict[str, Any]) -> dict[str, Any]:
             yaml_str = validate_and_serialize_exam(args)
 
         entry, next_store = upsert_exam(
-            exam_id=eid,
+            exam_id=existing["id"],
             raw_yaml=yaml_str,
             pinned=args.get("pinned"),
             prepend=False,
@@ -486,30 +793,63 @@ def _handle_tool_call(name: str, args: dict[str, Any]) -> dict[str, Any]:
 
     if name == "replace_exam_snippet":
         eid = str(args.get("id") or "").strip()
-        old_text = str(args.get("old_text") or "")
-        new_text = str(args.get("new_text") or "")
-        replace_all = bool(args.get("replace_all", False))
-        if not eid or not old_text:
-            raise ValueError("Thiếu id hoặc old_text.")
+        if not eid:
+            raise ValueError("Thiếu id đề thi.")
 
-        store = read_store()
-        existing = next((e for e in store["exams"] if e["id"] == eid), None)
+        edits_in = args.get("edits")
+        edit_ops: list[dict[str, Any]] = []
+        if isinstance(edits_in, list) and len(edits_in) > 0:
+            for idx, item in enumerate(edits_in, start=1):
+                if not isinstance(item, dict) or not str(item.get("old_text") or ""):
+                    raise ValueError(f"edits[{idx}] thiếu old_text.")
+                edit_ops.append(
+                    {
+                        "old_text": str(item.get("old_text") or "").replace("\r\n", "\n").replace("\r", "\n"),
+                        "new_text": str(item.get("new_text") or "").replace("\r\n", "\n").replace("\r", "\n"),
+                        "replace_all": bool(item.get("replace_all", False)),
+                    }
+                )
+        else:
+            old_text = str(args.get("old_text") or "").replace("\r\n", "\n").replace("\r", "\n")
+            new_text = str(args.get("new_text") or "").replace("\r\n", "\n").replace("\r", "\n")
+            if not old_text:
+                raise ValueError("Thiếu old_text hoặc danh sách edits.")
+            edit_ops.append(
+                {
+                    "old_text": old_text,
+                    "new_text": new_text,
+                    "replace_all": bool(args.get("replace_all", False)),
+                }
+            )
+
+        existing = get_exam_by_id(eid)
         if not existing:
             raise ValueError(f"Không tìm thấy đề thi có id '{eid}'.")
 
-        cur_yaml = existing["rawYaml"]
-        occurrences = cur_yaml.count(old_text)
-        if occurrences == 0:
-            raise ValueError("Không tìm thấy old_text trong nội dung YAML của đề.")
-        if occurrences > 1 and not replace_all:
-            raise ValueError(f"old_text xuất hiện {occurrences} lần; hãy truyền đoạn dài hơn để khớp duy nhất hoặc đặt replace_all=true.")
+        cur_yaml = existing["rawYaml"].replace("\r\n", "\n").replace("\r", "\n")
+        total_replacements = 0
+        for op_idx, op in enumerate(edit_ops, start=1):
+            needle = op["old_text"]
+            rep = op["new_text"]
+            rep_all = op["replace_all"]
+            occurrences = cur_yaml.count(needle)
+            prefix = f"edits[{op_idx}]: " if len(edit_ops) > 1 else ""
+            if occurrences == 0:
+                hint = _diagnose_missing_snippet(cur_yaml, needle)
+                raise ValueError(f"{prefix}Không tìm thấy old_text trong nội dung YAML của đề.{hint}")
+            if occurrences > 1 and not rep_all:
+                raise ValueError(
+                    f"{prefix}old_text xuất hiện {occurrences} lần; hãy truyền đoạn dài hơn để khớp duy nhất hoặc đặt replace_all=true."
+                )
+            cur_yaml = cur_yaml.replace(needle, rep) if rep_all else cur_yaml.replace(needle, rep, 1)
+            total_replacements += occurrences if rep_all else 1
 
-        next_yaml = cur_yaml.replace(old_text, new_text) if replace_all else cur_yaml.replace(old_text, new_text, 1)
-        next_yaml = validate_raw_yaml_basic(next_yaml)
-        entry, next_store = upsert_exam(exam_id=eid, raw_yaml=next_yaml, prepend=False)
+        validated_yaml = validate_raw_yaml_basic(cur_yaml)
+        entry, next_store = upsert_exam(exam_id=existing["id"], raw_yaml=validated_yaml, prepend=False)
         return {
             "updated": True,
-            "replacements": occurrences if replace_all else 1,
+            "edits_applied": len(edit_ops),
+            "replacements": total_replacements,
             "version": next_store["version"],
             "exam": summarize_exam(entry),
         }
@@ -522,10 +862,10 @@ def _handle_tool_call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return {"deleted": True, "id": eid, "version": store["version"]}
 
     if name == "list_folders":
-        store = read_store()
-        all_folders, subjects, folder_counts, subject_counts = _build_folder_tree(store)
+        version, summaries, persisted_folders = read_exam_summaries()
+        all_folders, subjects, folder_counts, subject_counts = _build_folder_tree(persisted_folders, summaries)
         return {
-            "version": store["version"],
+            "version": version,
             "folders": all_folders,
             "subjects": subjects,
             "folder_counts": folder_counts,
@@ -538,7 +878,7 @@ def _handle_tool_call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         norm_path = _normalize_folder_path(path)
         if action == "create":
             next_store = create_folder_path(path)
-            all_folders, subjects, _, _ = _build_folder_tree(next_store)
+            all_folders, subjects, _, _ = _build_folder_tree_from_store(next_store)
             return {
                 "action": "create",
                 "path": norm_path,
@@ -549,7 +889,7 @@ def _handle_tool_call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         if action in ("rename", "move"):
             new_path = str(args.get("new_path") or "")
             affected, next_store = rename_or_move_folder(path, new_path)
-            all_folders, subjects, _, _ = _build_folder_tree(next_store)
+            all_folders, subjects, _, _ = _build_folder_tree_from_store(next_store)
             return {
                 "action": action,
                 "path": norm_path,
@@ -562,7 +902,7 @@ def _handle_tool_call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         if action == "delete":
             delete_mode = str(args.get("delete_mode") or "keep_exams").strip()
             affected, next_store = delete_folder_path(path, mode=delete_mode)
-            all_folders, subjects, _, _ = _build_folder_tree(next_store)
+            all_folders, subjects, _, _ = _build_folder_tree_from_store(next_store)
             return {
                 "action": "delete",
                 "path": norm_path,
@@ -575,20 +915,53 @@ def _handle_tool_call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("action phải là 'create', 'rename', 'move' hoặc 'delete'.")
 
     if name == "move_exam":
-        eid = str(args.get("id") or "").strip()
-        if "folder" not in args or args.get("folder") is None:
-            raise ValueError("Thiếu trường 'folder' (truyền chuỗi rỗng \"\" để chuyển về Chưa phân loại).")
-        pinned_arg = args.get("pinned")
+        ids_arg = args.get("ids")
+        single_id = str(args.get("id") or "").strip()
+        if isinstance(ids_arg, list) and ids_arg:
+            target_ids = [str(x or "").strip() for x in ids_arg if str(x or "").strip()]
+        elif single_id:
+            target_ids = [single_id]
+        else:
+            raise ValueError("Cần truyền 'id' hoặc danh sách 'ids'.")
+
+        has_folder = "folder" in args and args.get("folder") is not None
+        has_pinned = "pinned" in args and args.get("pinned") is not None
+        has_title = "title" in args and args.get("title") is not None
+        has_limit = "time_limit" in args and args.get("time_limit") is not None
+
+        if not (has_folder or has_pinned or has_title or has_limit):
+            raise ValueError("Cần truyền ít nhất một trường cần cập nhật: folder, pinned, title hoặc time_limit.")
+
+        pinned_arg = args.get("pinned") if has_pinned else None
         if pinned_arg is not None and not isinstance(pinned_arg, bool):
             raise ValueError("pinned phải là boolean.")
-        entry, next_store = move_exam_to_folder(eid, str(args.get("folder")), pinned=pinned_arg)
-        all_folders, _, _, _ = _build_folder_tree(next_store)
+
+        updated_entries, next_store = patch_exams_meta(
+            target_ids,
+            folder=str(args.get("folder")) if has_folder else _UNSET,
+            pinned=pinned_arg,
+            title=str(args.get("title")) if has_title else _UNSET,
+            time_limit=args.get("time_limit") if has_limit else _UNSET,
+        )
+        all_folders, _, _, _ = _build_folder_tree_from_store(next_store)
+        summarized = [summarize_exam(e) for e in updated_entries]
+        if len(summarized) == 1 and not isinstance(ids_arg, list):
+            return {
+                "updated": True,
+                "version": next_store["version"],
+                "exam": summarized[0],
+                "folders": all_folders,
+            }
         return {
             "updated": True,
+            "count": len(summarized),
             "version": next_store["version"],
-            "exam": summarize_exam(entry),
+            "exams": summarized,
             "folders": all_folders,
         }
+
+    if name == "save_exam_asset":
+        return _save_exam_asset(args)
 
     if name == "start_web_server":
         open_browser = bool(args.get("open_browser", True))
@@ -633,7 +1006,7 @@ def main() -> None:
                 result = {
                     "protocolVersion": proto,
                     "capabilities": {"tools": {"listChanged": False}},
-                    "serverInfo": {"name": "otdo-mcp", "version": "1.1.0"},
+                    "serverInfo": {"name": "otdo-mcp", "version": "2.0.0"},
                 }
             elif method == "ping":
                 result = {}
